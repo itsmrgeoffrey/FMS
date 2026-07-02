@@ -592,13 +592,23 @@ def _plain_reasons(
             "this is first-time activity on a new or unseasoned account."
         )
 
-    if "behavioral_deviation" in c:
+    # When the amount both deviates from the norm AND the account has an established
+    # high-value pattern, the two facts read as contradictory if stated separately
+    # ("far outside normal" vs. "consistent with their profile"). Merge them into a
+    # single, coherent assessment so a reviewer isn't given mixed messaging.
+    if "behavioral_deviation" in c and "established_high_value_pattern" in c:
+        reasons.append(
+            f"At {cur} {txn.amount:,.2f}, this is larger than this account's typical "
+            f"{cur} {profile.avg_amount:,.0f} transfer — but the account has previously made "
+            f"{profile.ctr_level_count} high-value transfers, so the amount alone is only "
+            f"moderately unusual for this profile."
+        )
+    elif "behavioral_deviation" in c:
         reasons.append(
             f"This transfer of {cur} {txn.amount:,.2f} is far outside what this account "
             f"normally sends — their typical transfer is around {cur} {profile.avg_amount:,.0f}."
         )
-
-    if "established_high_value_pattern" in c:
+    elif "established_high_value_pattern" in c:
         reasons.append(
             f"This account regularly sends large amounts — they have made {profile.ctr_level_count} "
             f"high-value transfers before, so large transfers are consistent with their profile."
