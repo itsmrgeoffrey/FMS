@@ -1,0 +1,16 @@
+.env
+bank_config.yaml
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+fms.db
+node_modules/
+.next/
+*.log
+
+# Local tooling / editor config
+.claude/
+.vscode/
+.idea/

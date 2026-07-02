@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FMS bank connection config — copy to bank_config.yaml and fill in.
+# bank_config.yaml is git-ignored so your real credentials never get committed.
+#
+# FMS connects to your core banking / transaction database READ-ONLY and never
+# writes to it. Create a dedicated read-only DB user for this.
+# ─────────────────────────────────────────────────────────────────────────────
+
+database:
+  type: mysql              # "mysql" or "mssql"
+  host: localhost
+  port: 3306
+  user: fraud_monitor_reader
+  password: your_password_here
+  database: bank_core
+  # For MSSQL with Windows Authentication, set: trusted_connection: true
+
+tables:
+  # Define inward, outward, or both depending on your schema.
+  # Each section is optional — omit ones that don't apply.
+
+  inward:
+    table_name: inward_transactions
+    columns:
+      id: txn_id                       # primary key column (used as the poll checkpoint)
+      account_id: account_number
+      amount: credit_amount
+      timestamp: value_date
+      counterparty_account: sender_account_no
+      counterparty_name: sender_name
+      channel: payment_channel         # e.g. ACH, WIRE, CARD, MOBILE, ATM
+      currency: currency_code          # e.g. USD
+      reference: payment_ref
+      status: txn_status               # optional
+      # batch_id: batch_id             # optional — set if your table flags payroll/batch runs
+
+  outward:
+    table_name: outward_transactions
+    columns:
+      id: txn_id
+      account_id: account_number
+      amount: debit_amount
+      timestamp: value_date
+      counterparty_account: beneficiary_account_no
+      counterparty_name: beneficiary_name
+      channel: payment_channel
+      currency: currency_code
+      reference: payment_ref
+      status: txn_status
+      # batch_id: batch_id
+
+monitoring:
+  poll_interval_seconds: 30
+  history_days: 90                     # days of per-account history used as behavioural baseline
