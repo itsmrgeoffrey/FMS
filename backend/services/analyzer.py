@@ -415,7 +415,7 @@ def _compute_risk_score(
             components["behavioral_deviation"] = {
                 "score": dev_pts,
                 "reason": (
-                    f"This amount is much larger than what this account normally sends "
+                    f"This amount is much larger than this account's normal activity "
                     f"(typical transaction: {txn.currency} {profile.avg_amount:,.0f})"
                 ),
             }
@@ -618,6 +618,8 @@ def _plain_reasons(
 ) -> list[str]:
     c = risk.components
     cur = txn.currency
+    receiving = txn.direction == "INWARD"
+    moves = "receives" if receiving else "sends"
     reasons = []
 
     if "batch_payment" in c:
@@ -640,19 +642,19 @@ def _plain_reasons(
     if "behavioral_deviation" in c and "established_high_value_pattern" in c:
         reasons.append(
             f"At {cur} {txn.amount:,.2f}, this is larger than this account's typical "
-            f"{cur} {profile.avg_amount:,.0f} transfer — but the account has previously made "
-            f"{profile.ctr_level_count} high-value transfers, so the amount alone is only "
+            f"{cur} {profile.avg_amount:,.0f} transaction — but the account has "
+            f"{profile.ctr_level_count} prior high-value transactions, so the amount alone is only "
             f"moderately unusual for this profile."
         )
     elif "behavioral_deviation" in c:
         reasons.append(
             f"This transfer of {cur} {txn.amount:,.2f} is far outside what this account "
-            f"normally sends — their typical transfer is around {cur} {profile.avg_amount:,.0f}."
+            f"normally {moves} — their typical transaction is around {cur} {profile.avg_amount:,.0f}."
         )
     elif "established_high_value_pattern" in c:
         reasons.append(
-            f"This account regularly sends large amounts — they have made {profile.ctr_level_count} "
-            f"high-value transfers before, so large transfers are consistent with their profile."
+            f"This account regularly handles large amounts — it has {profile.ctr_level_count} "
+            f"prior high-value transactions, so large amounts are consistent with its profile."
         )
 
     if "high_value_transfer" in c:
@@ -668,8 +670,9 @@ def _plain_reasons(
         )
 
     if "velocity_clustering" in c:
+        verb = "received" if receiving else "made"
         reasons.append(
-            f"This account made {risk.rolling_5d_count} transfers over the past 5 days "
+            f"This account {verb} {risk.rolling_5d_count} transfers over the past 5 days "
             f"totalling {cur} {risk.rolling_5d_total:,.2f}, with no single transfer crossing "
             f"the {cur} {threshold:,.0f} threshold — the overall volume is unusually high."
         )
@@ -694,8 +697,11 @@ def _plain_reasons(
         )
 
     if "new_counterparty" in c:
-        name = txn.counterparty_name or txn.counterparty_account or "the recipient"
-        reasons.append(f"{name} has never received a payment from this account before.")
+        name = txn.counterparty_name or txn.counterparty_account or ("the sender" if receiving else "the recipient")
+        if receiving:
+            reasons.append(f"{name} has never sent money to this account before.")
+        else:
+            reasons.append(f"{name} has never received a payment from this account before.")
 
     if "odd_hours" in c:
         hour = txn.timestamp.hour if isinstance(txn.timestamp, datetime) else 0
