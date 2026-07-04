@@ -217,14 +217,17 @@ async def poll_loop() -> None:
     global _running, _last_poll_at, _last_error
 
     adapter = get_adapter()
-    interval = int(bank_config.get("monitoring", {}).get("poll_interval_seconds", 30))
-    history_days = int(bank_config.get("monitoring", {}).get("history_days", 90))
     table_keys = list(bank_config.get("tables", {}).keys())
 
     _running = True
-    log.info(f"Poller started — watching tables: {table_keys} every {interval}s")
+    log.info(f"Poller started — watching tables: {table_keys}")
 
     while _running:
+        # Re-read monitoring settings every cycle so changes made in the
+        # Settings UI apply without a restart.
+        monitoring = bank_config.get("monitoring", {})
+        interval = int(monitoring.get("poll_interval_seconds", 30))
+        history_days = int(monitoring.get("history_days", 90))
         try:
             # Reconnect transparently if the bank DB was never up or dropped.
             if not await _ensure_connected(adapter):

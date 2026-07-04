@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_db
 from backend.routers import cases, stats, ws, transactions, reports
+from backend.routers import settings as settings_routes
 from backend.services import poller
 
 logging.basicConfig(
@@ -42,3 +43,4 @@ app.include_router(stats.router)
 app.include_router(ws.router)
 app.include_router(transactions.router)
 app.include_router(reports.router)
+app.include_router(settings_routes.router)

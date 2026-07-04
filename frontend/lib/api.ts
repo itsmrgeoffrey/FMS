@@ -44,6 +44,15 @@ export const api = {
 
   getStats: (): Promise<Stats> => req<Stats>("/stats"),
 
+  getSettings: (): Promise<Record<string, unknown>> => req("/settings"),
+
+  updateSettings: (payload: Record<string, unknown>): Promise<{ saved: boolean; restart_required: boolean }> =>
+    req("/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+
   // Regulatory filing exports (CSV download links).
   ctrReportUrl: (params?: Record<string, string | undefined>) => reportUrl("ctr", params),
   sarReportUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params),
