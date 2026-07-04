@@ -50,7 +50,20 @@ Core banking DB ──(read-only adapter: MySQL / MSSQL)──▶ Poller
 
 FMS only ever **reads** from your banking database. Its own case data lives in a separate SQLite store.
 
-## Quickstart
+## Quickstart (Docker — recommended)
+
+**Requirements:** Docker, and read access to a MySQL or SQL Server transaction database.
+
+```bash
+cp .env.example .env                            # add keys as needed
+cp bank_config.example.yaml bank_config.yaml    # point at your database (read-only user)
+docker compose up -d
+# open http://localhost:3000 — finish configuration on the Settings page
+```
+
+Connecting to a database on the host machine: use `host.docker.internal` as the host in `bank_config.yaml`. MSSQL Windows Authentication doesn't work from a Linux container — use a SQL-auth user instead.
+
+## Quickstart (manual)
 
 **Requirements:** Python 3.11+, Node 18+, and read access to a MySQL or SQL Server transaction database.
 

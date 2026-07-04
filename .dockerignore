@@ -1,0 +1,25 @@
+# Secrets and local state — mounted at runtime, never baked into images
+.env
+bank_config.yaml
+fms.db
+*.log
+
+# Downloaded OFAC data (refresh inside the container or mount ./data)
+data/ofac_sdn.json
+data/sdn.csv
+data/alt.csv
+
+# Build/runtime artifacts
+__pycache__/
+*.pyc
+.venv/
+venv/
+frontend/node_modules/
+frontend/.next/
+
+# Tooling
+.git/
+.claude/
+.vscode/
+.idea/
+tests/

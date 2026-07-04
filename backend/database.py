@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -6,7 +7,8 @@ from sqlalchemy.orm import DeclarativeBase
 
 log = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent.parent / "fms.db"
+# FMS_DB_PATH lets containerized deployments keep the case store on a volume.
+DB_PATH = Path(os.getenv("FMS_DB_PATH", "") or Path(__file__).parent.parent / "fms.db")
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
 engine = create_async_engine(DATABASE_URL, echo=False)

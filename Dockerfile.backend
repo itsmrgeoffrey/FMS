@@ -1,0 +1,27 @@
+# FMS backend — FastAPI + poller + risk engine
+FROM python:3.11-slim
+
+# Microsoft ODBC Driver 17 for SQL Server (required by pyodbc for MSSQL cores).
+# MySQL needs no system driver (aiomysql is pure Python).
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg2 ca-certificates \
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql17 unixodbc \
+    && apt-get purge -y curl gnupg2 && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ backend/
+COPY scripts/ scripts/
+COPY data/ofac_sdn.sample.json data/ofac_sdn.sample.json
+
+# Case store lives on a volume (see docker-compose.yml)
+ENV FMS_DB_PATH=/data/fms.db
+
+EXPOSE 8002
+CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8002"]

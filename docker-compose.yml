@@ -1,0 +1,42 @@
+# FMS — one-command deployment
+#
+#   1. cp .env.example .env                       (fill in keys as needed)
+#   2. cp bank_config.example.yaml bank_config.yaml   (point at your bank DB)
+#   3. docker compose up -d
+#   4. open http://localhost:3000
+#
+# Connecting to a database on the HOST machine (not in another container):
+#   - use host: "host.docker.internal" in bank_config.yaml (not "localhost" or ".")
+#   - MSSQL Windows Authentication (trusted_connection) does NOT work from a
+#     Linux container — create a SQL-auth user and set user/password instead.
+#   - Make sure the database accepts TCP connections (MSSQL: enable TCP/IP in
+#     Configuration Manager; default port 1433).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./bank_config.yaml:/app/bank_config.yaml
+      - ./.env:/app/.env
+      - ./data:/app/data          # OFAC list data (run scripts/update_ofac.py to refresh)
+      - fms-data:/data            # case store (fms.db)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:8002
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  fms-data:
