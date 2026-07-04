@@ -17,6 +17,17 @@ FMS is designed around US Bank Secrecy Act (BSA) reporting obligations administe
 - **Where to see it:** the `sar_recommended` flag and reason on each case, and the `/reports/sar` export.
 - **Note on deadlines:** SARs generally must be filed within 30 calendar days of initial detection. FMS timestamps detection (case `created_at`) to support that clock, but does not track or enforce filing deadlines.
 
+## OFAC sanctions screening
+
+- **Rule:** US persons are generally prohibited from transacting with parties on OFAC's Specially Designated Nationals (SDN) list; such transactions must be **blocked or rejected** and reported to OFAC (31 CFR Part 501). This obligation is absolute — it does not depend on suspicion or amount.
+- **What FMS does:** every counterparty name is screened against the SDN list (primary names + aliases; refresh with `scripts/update_ofac.py`). A match overrides the risk score: the case is forced HIGH with an explicit block-or-reject instruction and the matched entry, program, and match score for human adjudication. Name screening produces false positives — verify before acting.
+- **PEP screening:** if a `data/pep.json` list is provided, matches are flagged for enhanced due diligence (not blocking). FMS does not bundle PEP data; quality PEP lists are typically commercial.
+- **Where to see it:** the red OFAC banner on a case, the `sanctions_hit`/`sanctions_detail` fields, and alert emails.
+
+## SAR filing deadline
+
+FMS timestamps detection (case `created_at`) and reports the 30-day filing deadline and days remaining on every SAR report row (31 CFR 1020.320(b)(3)). It tracks the clock; it does not enforce it.
+
 ## CTR vs. SAR — a deliberate distinction
 
 FMS keeps these two tracks separate, because they are separate obligations:
@@ -28,9 +39,9 @@ The engine models both independently so a compliance officer sees the right obli
 
 ## What FMS does *not* do
 
-- It does not transmit anything to FinCEN or any regulator.
-- It does not complete FinCEN Form 112 (CTR) or Form 111 (SAR).
+- It does not transmit anything to FinCEN or any regulator (no BSA E-Filing integration).
+- It produces filing **worksheets** pre-filled from transaction data — not completed Forms 112/111. Subject identifiers, KYC details, and the final narrative require officer completion.
 - It does not make final suspicious/not-suspicious determinations — a human officer does.
-- It does not track filing deadlines, exemptions (e.g. CTR exempt persons), or recordkeeping retention.
+- It does not handle CTR exemptions (exempt persons) or recordkeeping retention; deadline tracking is informational, not enforced.
 
 Use FMS to surface and organize; use your BSA/AML program to decide and file.

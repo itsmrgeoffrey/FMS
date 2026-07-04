@@ -32,6 +32,8 @@ class FraudCaseOut(BaseModel):
     ctr_reason: str | None
     sar_recommended: bool = False
     sar_reason: str | None = None
+    sanctions_hit: bool = False
+    sanctions_detail: str | None = None
     confidence: str
     fraud_type: str | None
     reasons: list[str]
@@ -58,6 +60,7 @@ class FraudCaseListItem(BaseModel):
     risk_score: int | None
     ctr_required: bool
     sar_recommended: bool = False
+    sanctions_hit: bool = False
     confidence: str
     fraud_type: str | None
     status: str

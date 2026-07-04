@@ -24,6 +24,8 @@ _ADDED_COLUMNS = {
     "fraud_cases": [
         ("sar_recommended", "BOOLEAN DEFAULT 0"),
         ("sar_reason", "TEXT"),
+        ("sanctions_hit", "BOOLEAN DEFAULT 0"),
+        ("sanctions_detail", "TEXT"),
     ],
 }
 

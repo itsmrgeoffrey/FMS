@@ -102,6 +102,11 @@ export function CasesTable({ refresh }: { refresh?: number }) {
                 <td className="px-4 py-3 text-gray-600">{c.fraud_type || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
+                    {c.sanctions_hit && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-red-600 text-white border border-red-700">
+                        OFAC
+                      </span>
+                    )}
                     {c.ctr_required && (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
                         CTR

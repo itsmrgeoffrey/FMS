@@ -1,0 +1,10 @@
+[
+  {"name": "GLOBAL SHADOW TRADING LLC", "type": "Entity", "program": "SDGT", "source": "OFAC SDN (sample)"},
+  {"name": "REDLINE SHIPPING CO", "type": "Entity", "program": "IRAN", "source": "OFAC SDN (sample)"},
+  {"name": "IVAN PETROV VOLKOV", "type": "Individual", "program": "UKRAINE-EO13662", "source": "OFAC SDN (sample)"},
+  {"name": "NORTHWIND LOGISTICS GROUP", "type": "Entity", "program": "NPWMD", "source": "OFAC SDN (sample)"},
+  {"name": "MARCUS ADEBAYO OKONKWO", "type": "Individual", "program": "SDNTK", "source": "OFAC SDN (sample)"},
+  {"name": "CRESCENT FINANCIAL HOLDINGS", "type": "Entity", "program": "SDGT", "source": "OFAC SDN (sample)"},
+  {"name": "ANATOLY SERGEYEVICH KUZNETSOV", "type": "Individual", "program": "RUSSIA-EO14024", "source": "OFAC SDN (sample)"},
+  {"name": "SILK ROAD EXCHANGE LTD", "type": "Entity", "program": "CYBER2", "source": "OFAC SDN (sample)"}
+]

@@ -22,9 +22,11 @@ Financial-crime detection protects the integrity of the payment system — money
   - Behavioral deviation from an account's own baseline
   - New counterparty / new channel / odd-hours signals
   - Payroll/batch suppression so legitimate bulk runs don't false-positive
+- **OFAC sanctions screening** — every counterparty is screened against the OFAC SDN list (refresh with `scripts/update_ofac.py`); a match forces a block-or-reject case regardless of risk score. Optional PEP list support (`data/pep.json`) for enhanced-due-diligence flags.
 - **CTR assessment** — single-transaction and same-day aggregate detection against currency-aware thresholds (FinCEN USD $10,000 and local equivalents).
-- **SAR assessment** — recommends a Suspicious Activity Report for structuring/smurfing (any amount) and for suspicious activity at/above the SAR threshold.
-- **Plain-English case summaries** — an LLM writes an officer-readable explanation, with a **deterministic fallback** so an AI outage never blocks a case from being created.
+- **SAR assessment** — recommends a Suspicious Activity Report for structuring/smurfing (any amount) and for suspicious activity at/above the SAR threshold, with **30-day filing-deadline tracking**.
+- **FinCEN filing worksheets** — `/reports/ctr?format=fincen` and `/reports/sar?format=fincen` emit Form 112 / Form 111 field structures pre-filled from transaction data, with explicit lists of what still needs KYC records and officer review.
+- **Plain-English case summaries** — an LLM writes an officer-readable explanation, with a **deterministic fallback** so an AI outage never blocks a case from being created. Point `LLM_BASE_URL` at a local OpenAI-compatible endpoint (e.g. Ollama) and no transaction data leaves your infrastructure.
 - **Case management + audit trail** — open / under-review / confirmed / dismissed / escalated, every action attributed to a named actor.
 - **Filing exports** — `/reports/ctr` and `/reports/sar` as JSON or CSV, ready to hand to your filer.
 - **Live dashboard** — Next.js UI with a real-time alert feed (WebSocket), filtering, and per-case detail.
@@ -84,6 +86,10 @@ FMS handles sensitive financial data. Use a **read-only** database user, set `FM
 ## Contributing
 
 Contributions welcome — new database adapters, additional detection signals, and jurisdiction thresholds especially. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Methodology
+
+Every threshold, scoring rule, and screening parameter is documented — with its regulatory basis and testing evidence — in [MODEL.md](MODEL.md), written to support FFIEC/SR 11-7-style model documentation expectations.
 
 ## License
 

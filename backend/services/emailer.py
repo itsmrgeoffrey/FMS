@@ -27,6 +27,14 @@ def send_fraud_alert(case: dict) -> None:
         if filings else ""
     )
 
+    if case.get("sanctions_hit"):
+        subject = f"⛔ OFAC SANCTIONS MATCH — {case['currency']} {case['amount']:,.2f} — BLOCK & REVIEW"
+        filing_html = (
+            f'<div style="background:#7f1d1d;color:#ffffff;padding:14px;border-radius:8px;margin-bottom:16px;">'
+            f'<strong>OFAC SANCTIONS MATCH — transaction must be blocked or rejected and reported to OFAC.</strong>'
+            f'<div style="margin-top:6px;font-size:13px;">{case.get("sanctions_detail", "")}</div></div>'
+        ) + filing_html
+
     body = f"""
     <html><body style="font-family: Arial, sans-serif; color: #1a1a1a;">
       <div style="background:#fee2e2;border-left:4px solid #dc2626;padding:16px;border-radius:8px;margin-bottom:16px;">

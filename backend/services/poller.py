@@ -130,6 +130,8 @@ async def _process_table(adapter: BaseAdapter, table_key: str, history_days: int
                 ctr_reason=result.ctr_reason,
                 sar_recommended=result.sar_recommended,
                 sar_reason=result.sar_reason,
+                sanctions_hit=result.sanctions_hit,
+                sanctions_detail=result.sanctions_detail,
                 confidence=result.confidence,
                 fraud_type=result.fraud_type,
                 reasons=result.reasons,
@@ -153,6 +155,7 @@ async def _process_table(adapter: BaseAdapter, table_key: str, history_days: int
                     f"FRAUD FLAGGED — account {txn.account_id} | {txn.currency} {txn.amount:,.2f} "
                     f"| confidence={result.confidence} | type={result.fraud_type}"
                     f"{' | SAR recommended' if result.sar_recommended else ''}"
+                    f"{' | *** OFAC SANCTIONS MATCH ***' if result.sanctions_hit else ''}"
                 )
                 case_dict = {
                     "id": case.id,
@@ -169,6 +172,8 @@ async def _process_table(adapter: BaseAdapter, table_key: str, history_days: int
                     "ai_summary": case.ai_summary,
                     "ctr_required": case.ctr_required,
                     "sar_recommended": case.sar_recommended,
+                    "sanctions_hit": case.sanctions_hit,
+                    "sanctions_detail": case.sanctions_detail,
                     "created_at": str(case.created_at),
                 }
                 await broadcaster.broadcast({"event": "new_case", "case": case_dict})

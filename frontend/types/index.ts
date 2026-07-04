@@ -25,6 +25,8 @@ export interface FraudCase {
   ctr_reason: string | null;
   sar_recommended: boolean;
   sar_reason: string | null;
+  sanctions_hit: boolean;
+  sanctions_detail: string | null;
   confidence: "HIGH" | "MEDIUM" | "LOW";
   fraud_type: string | null;
   reasons: string[];
@@ -49,6 +51,7 @@ export interface FraudCaseListItem {
   risk_score: number | null;
   ctr_required: boolean;
   sar_recommended: boolean;
+  sanctions_hit: boolean;
   confidence: "HIGH" | "MEDIUM" | "LOW";
   fraud_type: string | null;
   status: string;

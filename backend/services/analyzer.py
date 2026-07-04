@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from groq import AsyncGroq
 from backend.adapters.base import NormalizedTransaction
 from backend.config import settings
+from backend.services import sanctions
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +21,44 @@ def _get_client() -> AsyncGroq:
     if _client is None:
         _client = AsyncGroq(api_key=settings.groq_api_key)
     return _client
+
+
+async def _generate_summary_text(system: str, user: str) -> str:
+    """Call the configured LLM. If LLM_BASE_URL is set, use that OpenAI-compatible
+    endpoint (e.g. a local Ollama) so transaction data never leaves the host;
+    otherwise fall back to Groq. Raises on failure — the caller handles fallback."""
+    if settings.llm_base_url:
+        import httpx
+        headers = {"Content-Type": "application/json"}
+        if settings.llm_api_key:
+            headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+        async with httpx.AsyncClient(timeout=60) as http:
+            resp = await http.post(
+                settings.llm_base_url.rstrip("/") + "/chat/completions",
+                headers=headers,
+                json={
+                    "model": settings.llm_model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "max_tokens": 200,
+                    "temperature": 0,
+                },
+            )
+            resp.raise_for_status()
+            return (resp.json()["choices"][0]["message"]["content"] or "").strip()
+
+    response = await _get_client().chat.completions.create(
+        model=settings.llm_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        max_tokens=200,
+        temperature=0,
+    )
+    return (response.choices[0].message.content or "").strip()
 
 # ─── Currency-aware CTR thresholds ────────────────────────────────────────────
 # Cash-transaction reporting threshold. In the US this is the FinCEN / Bank
@@ -162,6 +201,8 @@ class FraudAnalysis:
     ctr_reason: str
     sar_recommended: bool = False
     sar_reason: str = ""
+    sanctions_hit: bool = False
+    sanctions_detail: str = ""
 
 
 # ─── CTR obligation assessment ────────────────────────────────────────────────
@@ -728,6 +769,35 @@ async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransactio
     fraud_type = _pick_fraud_type(risk) if is_fraudulent else None
     sar_recommended, sar_reason = _assess_sar(txn, risk, is_fraudulent, threshold)
 
+    # OFAC sanctions screening overrides the behavioural score: a listed
+    # counterparty is a block/report obligation regardless of risk level.
+    # PEP matches are different in kind — enhanced due diligence, not blocking —
+    # so they annotate the case instead of overriding it.
+    sanctions_match = sanctions.screen(txn.counterparty_name)
+    sanctions_hit = sanctions_match is not None and sanctions_match.list_type == "SDN"
+    sanctions_detail = ""
+    if sanctions_match and sanctions_match.list_type == "SDN":
+        sanctions_detail = (
+            f"Counterparty '{sanctions_match.query}' matches {sanctions_match.source} "
+            f"entry '{sanctions_match.matched_name}' "
+            f"(program: {sanctions_match.program or 'N/A'}, {sanctions_match.score:.0%} match)"
+        )
+        is_fraudulent = True
+        confidence = "HIGH"
+        fraud_type = "sanctions match"
+        reasons = [
+            f"OFAC SANCTIONS MATCH — {sanctions_detail}. This is a listed party: the "
+            f"transaction must be blocked or rejected and reported to OFAC. Escalate to "
+            f"your BSA/AML officer immediately."
+        ] + reasons
+    elif sanctions_match:  # PEP
+        reasons = [
+            f"POLITICALLY EXPOSED PERSON — counterparty '{sanctions_match.query}' matches "
+            f"{sanctions_match.source} entry '{sanctions_match.matched_name}' "
+            f"({sanctions_match.score:.0%} match). Not a blocking obligation, but enhanced "
+            f"due diligence is expected for PEP-linked transactions."
+        ] + reasons
+
     reasons_text = "\n".join(f"- {r}" for r in reasons)
 
     # Structured delta report — gives the AI the specific numbers so its explanation
@@ -786,16 +856,7 @@ Respond with ONLY this JSON:
     # back to a deterministic summary instead of letting the exception propagate.
     summary = ""
     try:
-        response = await _get_client().chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": summary_prompt},
-            ],
-            max_tokens=200,
-            temperature=0,
-        )
-        raw = (response.choices[0].message.content or "").strip()
+        raw = await _generate_summary_text(SYSTEM_PROMPT, summary_prompt)
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -821,6 +882,8 @@ Respond with ONLY this JSON:
         ctr_reason=ctr.reason,
         sar_recommended=sar_recommended,
         sar_reason=sar_reason,
+        sanctions_hit=sanctions_hit,
+        sanctions_detail=sanctions_detail,
     )
 
 

@@ -35,6 +35,8 @@ class FraudCase(Base):
     ctr_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     sar_recommended: Mapped[bool] = mapped_column(Boolean, default=False)
     sar_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sanctions_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    sanctions_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[str] = mapped_column(String)            # HIGH / MEDIUM / LOW
     fraud_type: Mapped[str | None] = mapped_column(String, nullable=True)
     reasons: Mapped[list] = mapped_column(JSON, default=list)

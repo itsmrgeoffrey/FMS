@@ -52,3 +52,15 @@ tables:
 monitoring:
   poll_interval_seconds: 30
   history_days: 90                     # days of per-account history used as behavioural baseline
+
+# Optional — used to pre-fill the filing-institution section of FinCEN
+# CTR (Form 112) / SAR (Form 111) export worksheets (/reports/*?format=fincen).
+institution:
+  name: "Example Community Bank"
+  ein: ""                              # Employer Identification Number
+  address: ""
+  city: ""
+  state: ""
+  zip: ""
+  primary_regulator: ""                # e.g. FDIC, OCC, NCUA, FRB
+
