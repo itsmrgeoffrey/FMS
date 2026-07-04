@@ -96,15 +96,15 @@ export default function CaseDetailPage() {
 
       {/* OFAC Sanctions Panel — block/report obligation, most severe */}
       {caseData.sanctions_hit && (
-        <section className="bg-red-600 rounded-lg border border-red-700 p-5 text-white">
+        <section className="bg-red-50 rounded-lg border border-red-200 border-l-4 border-l-red-400 p-5">
           <div className="flex items-start gap-3">
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-white text-red-700 shrink-0 mt-0.5">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 border border-red-300 shrink-0 mt-0.5">
               OFAC MATCH
             </span>
             <div>
-              <p className="text-sm font-semibold mb-1">Sanctions screening match — block or reject this transaction</p>
-              <p className="text-xs leading-relaxed opacity-90">{caseData.sanctions_detail}</p>
-              <p className="text-xs mt-2 opacity-75">
+              <p className="text-sm font-semibold text-red-900 mb-1">Sanctions screening match — block or reject this transaction</p>
+              <p className="text-xs text-red-700 leading-relaxed">{caseData.sanctions_detail}</p>
+              <p className="text-xs text-red-500 mt-2">
                 A match against the OFAC SDN list is a blocking/reporting obligation under US sanctions law — escalate to your BSA/AML officer immediately. Verify the match before acting; name screening can produce false positives.
               </p>
             </div>

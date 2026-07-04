@@ -103,7 +103,7 @@ export function CasesTable({ refresh }: { refresh?: number }) {
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     {c.sanctions_hit && (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-red-600 text-white border border-red-700">
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-red-50 text-red-700 border border-red-200">
                         OFAC
                       </span>
                     )}
