@@ -52,7 +52,7 @@ export function ActionPanel({
   if (caseData.status === "CLEAN") {
     return (
       <p className="text-sm text-green-600 font-medium">
-        Transaction passed AI review — no action required.
+        No fraud signals detected — cleared by the risk engine. No action required.
       </p>
     );
   }

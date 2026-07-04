@@ -148,7 +148,7 @@ export default function CaseDetailPage() {
         </section>
       )}
 
-      {/* AI Analysis — fraud risk track */}
+      {/* Risk engine analysis — fraud risk track */}
       <section className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center gap-3 mb-4">
           <h2 className="text-sm font-semibold text-gray-700">Fraud Risk Analysis</h2>

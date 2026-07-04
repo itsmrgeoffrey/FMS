@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "FMS — Fraud Monitoring System",
-  description: "AI-powered bank fraud detection",
+  description: "Real-time transaction monitoring and BSA/AML compliance",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
