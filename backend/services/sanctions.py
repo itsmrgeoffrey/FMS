@@ -60,6 +60,39 @@ def _normalize(name: str | None) -> str:
 
 
 _entries: list[dict] | None = None
+# Performance indexes over _entries, built at load time. With the full OFAC list
+# (~40k names) a linear fuzzy scan costs seconds per screen; the trigram index
+# narrows each query to a small candidate set before any similarity scoring,
+# and the exact-name map answers clean hits in O(1).
+_exact: dict[str, int] = {}
+_trigram_index: dict[str, list[int]] = {}
+_trigrams_per_entry: list[int] = []
+_screen_cache: dict[tuple[str, float], "SanctionsMatch | None"] = {}
+
+
+def _trigrams(norm: str) -> set[str]:
+    """Padded per-token trigrams — token order doesn't change the set."""
+    grams: set[str] = set()
+    for token in norm.split():
+        padded = f"  {token} "
+        grams.update(padded[i:i + 3] for i in range(len(padded) - 2))
+    return grams
+
+
+def _build_indexes() -> None:
+    global _exact, _trigram_index, _trigrams_per_entry
+    _exact = {}
+    _trigram_index = {}
+    _trigrams_per_entry = []
+    _screen_cache.clear()
+    for i, e in enumerate(_entries or []):
+        norm = e["norm"]
+        if norm and norm not in _exact:
+            _exact[norm] = i
+        grams = _trigrams(norm)
+        _trigrams_per_entry.append(len(grams))
+        for g in grams:
+            _trigram_index.setdefault(g, []).append(i)
 
 
 def _load() -> list[dict]:
@@ -96,6 +129,7 @@ def _load() -> list[dict]:
         log.info(f"Sanctions screening: loaded {len(pep)} PEP entries from {_PEP_LIST.name}")
 
     using = "full OFAC list" if path == _FULL_LIST else "bundled SAMPLE list (run scripts/update_ofac.py for the live list)"
+    _build_indexes()
     log.info(f"Sanctions screening: loaded {len(_entries)} entries — {using}")
     return _entries
 
@@ -115,26 +149,62 @@ def _similarity(a: str, b: str) -> float:
     return max(seq, jac)
 
 
+def _make_match(name: str | None, e: dict, score: float) -> SanctionsMatch:
+    return SanctionsMatch(
+        query=name or "",
+        matched_name=e["name"],
+        score=round(score, 3),
+        program=e["program"],
+        sdn_type=e["type"],
+        source=e["source"],
+        list_type=e.get("list_type", "SDN"),
+    )
+
+
 def screen(name: str | None, threshold: float = DEFAULT_THRESHOLD) -> SanctionsMatch | None:
     """Return the best sanctions match for `name` at/above `threshold`, else None."""
     q = _normalize(name)
     if not q:
         return None
 
+    entries = _load()
+    cache_key = (q, threshold)
+    if cache_key in _screen_cache:
+        return _screen_cache[cache_key]
+
+    # Fast path: exact normalized match.
+    idx = _exact.get(q)
+    if idx is not None:
+        result = _make_match(name, entries[idx], 1.0)
+        _screen_cache[cache_key] = result
+        return result
+
+    # Candidate generation: entries sharing enough trigrams with the query.
+    # A 0.90 similarity requires substantial character overlap, so requiring
+    # ~half the query's trigrams keeps recall while cutting 40k entries to tens.
+    q_grams = _trigrams(q)
+    counts: dict[int, int] = {}
+    for g in q_grams:
+        for i in _trigram_index.get(g, ()):
+            counts[i] = counts.get(i, 0) + 1
+
+    min_shared = max(2, len(q_grams) // 2)
+    candidates = [i for i, c in counts.items() if c >= min_shared]
+    # Guard the pathological case (very short/common names): score only the
+    # strongest-overlapping candidates.
+    if len(candidates) > 500:
+        candidates = sorted(candidates, key=lambda i: -counts[i])[:500]
+
     best: SanctionsMatch | None = None
-    for e in _load():
-        en = e["norm"]
-        if not en:
+    for i in candidates:
+        e = entries[i]
+        if not e["norm"]:
             continue
-        score = 1.0 if en == q else _similarity(q, en)
+        score = _similarity(q, e["norm"])
         if score >= threshold and (best is None or score > best.score):
-            best = SanctionsMatch(
-                query=name or "",
-                matched_name=e["name"],
-                score=round(score, 3),
-                program=e["program"],
-                sdn_type=e["type"],
-                source=e["source"],
-                list_type=e.get("list_type", "SDN"),
-            )
+            best = _make_match(name, e, score)
+
+    _screen_cache[cache_key] = best
+    if len(_screen_cache) > 10_000:  # bound memory across long uptimes
+        _screen_cache.clear()
     return best

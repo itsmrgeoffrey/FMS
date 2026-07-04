@@ -37,16 +37,25 @@ def _fetch(url: str) -> str:
 
 def main() -> int:
     DATA_DIR.mkdir(exist_ok=True)
-    try:
-        sdn_raw = _fetch(SDN_URL)
-        alt_raw = _fetch(ALT_URL)
-    except Exception as e:
-        print(f"[ERROR] Could not download the OFAC list: {e}")
-        print("Manual option: download sdn.csv and alt.csv from")
-        print(f"  {SDN_URL}\n  {ALT_URL}")
-        print(f"then re-run, or hand-build {OUT} as a JSON list of "
-              '{"name","type","program","source"} objects.')
-        return 1
+    local_sdn = DATA_DIR / "sdn.csv"
+    local_alt = DATA_DIR / "alt.csv"
+
+    # Pre-downloaded files take precedence — supports environments where Python's
+    # TLS is intercepted (corporate proxy/AV) but curl/browser downloads work.
+    if local_sdn.exists() and local_alt.exists():
+        print(f"Using pre-downloaded {local_sdn.name} and {local_alt.name} from {DATA_DIR}")
+        sdn_raw = local_sdn.read_text(encoding="latin-1")
+        alt_raw = local_alt.read_text(encoding="latin-1")
+    else:
+        try:
+            sdn_raw = _fetch(SDN_URL)
+            alt_raw = _fetch(ALT_URL)
+        except Exception as e:
+            print(f"[ERROR] Could not download the OFAC list: {e}")
+            print("Manual option: download sdn.csv and alt.csv from")
+            print(f"  {SDN_URL}\n  {ALT_URL}")
+            print(f"and place them in {DATA_DIR}, then re-run.")
+            return 1
 
     entries: list[dict] = []
 

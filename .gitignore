@@ -14,3 +14,8 @@ node_modules/
 .claude/
 .vscode/
 .idea/
+
+# Downloaded OFAC list data (refreshed via scripts/update_ofac.py; sample stays committed)
+data/ofac_sdn.json
+data/sdn.csv
+data/alt.csv

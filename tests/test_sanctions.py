@@ -1,11 +1,24 @@
 """Unit tests for OFAC sanctions screening (backend/services/sanctions.py).
 
 Runs against the bundled sample list — no network, no full OFAC download needed.
+The sample list is pinned explicitly so these tests behave identically whether
+or not a downloaded data/ofac_sdn.json is present on the machine.
 """
+from pathlib import Path
+
 from backend.services import sanctions as S
+
+_ORIG_FULL_LIST = S._FULL_LIST
 
 
 def setup_module():
+    # Force the bundled sample list even if the full OFAC download exists.
+    S._FULL_LIST = Path("__nonexistent_for_tests__")
+    S.reload()
+
+
+def teardown_module():
+    S._FULL_LIST = _ORIG_FULL_LIST
     S.reload()
 
 
