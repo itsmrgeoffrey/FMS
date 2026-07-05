@@ -65,6 +65,24 @@ export interface CasesPage {
   limit: number;
 }
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  full_name: string | null;
+  role: "admin" | "analyst";
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface AuditEntry {
+  id: number;
+  username: string;
+  action: string;
+  target: string | null;
+  detail: string | null;
+  created_at: string;
+}
+
 export interface Stats {
   flagged_today: number;
   high_confidence: number;

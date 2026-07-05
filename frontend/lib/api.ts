@@ -1,11 +1,35 @@
-import type { CasesPage, FraudCase, Stats } from "@/types";
+import type { CasesPage, FraudCase, Stats, AuthUser, AuditEntry } from "@/types";
 
 const BASE = "/api";
-// Optional — only needed if the backend has FMS_API_KEY set.
+// Optional — only needed if the backend has FMS_API_KEY set (machine auth).
 const API_KEY = process.env.NEXT_PUBLIC_FMS_API_KEY;
 
+const TOKEN_KEY = "fms.token";
+const USER_KEY = "fms.user";
+
+export const auth = {
+  token: (): string | null => (typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null),
+  user: (): AuthUser | null => {
+    if (typeof window === "undefined") return null;
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as AuthUser) : null;
+  },
+  set: (token: string, user: AuthUser) => {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  },
+  clear: () => {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  },
+};
+
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  return API_KEY ? { ...extra, "X-API-Key": API_KEY } : extra;
+  const headers = { ...extra };
+  const token = auth.token();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (API_KEY) headers["X-API-Key"] = API_KEY;
+  return headers;
 }
 
 async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -13,6 +37,14 @@ async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...options,
     headers: authHeaders(options.headers as Record<string, string>),
   });
+  if (res.status === 401) {
+    // Session expired or missing — drop creds and bounce to login.
+    auth.clear();
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+    throw new Error("Not authenticated");
+  }
   if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -56,4 +88,21 @@ export const api = {
   // Regulatory filing exports (CSV download links).
   ctrReportUrl: (params?: Record<string, string | undefined>) => reportUrl("ctr", params),
   sarReportUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params),
+
+  // Auth
+  signup: (username: string, password: string, full_name?: string): Promise<{ token: string; user: AuthUser }> =>
+    req("/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, full_name }),
+    }),
+  login: (username: string, password: string): Promise<{ token: string; user: AuthUser }> =>
+    req("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    }),
+
+  // Activity log
+  getAudit: (limit = 50): Promise<AuditEntry[]> => req(`/audit?limit=${limit}`),
 };
