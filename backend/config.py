@@ -1,4 +1,5 @@
 import os
+import secrets
 import yaml
 from pathlib import Path
 from pydantic_settings import BaseSettings
@@ -21,12 +22,26 @@ class Settings(BaseSettings):
     gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "")
     alert_email: str = os.getenv("ALERT_EMAIL", "")
     fms_api_key: str = os.getenv("FMS_API_KEY", "")
+    # Secret used to sign login tokens. Generated once and persisted to .env so
+    # issued tokens stay valid across restarts.
+    auth_secret: str = os.getenv("FMS_AUTH_SECRET", "")
+    # Hours a login token stays valid.
+    auth_token_ttl_hours: int = int(os.getenv("FMS_AUTH_TOKEN_TTL_HOURS", "12"))
 
     class Config:
         env_file = ROOT / ".env"
+        extra = "ignore"  # tolerate .env keys that don't map to a field (e.g. FMS_AUTH_SECRET)
 
 
 settings = Settings()
+
+if not settings.auth_secret:
+    settings.auth_secret = secrets.token_hex(32)
+    try:
+        with open(ROOT / ".env", "a", encoding="utf-8") as f:
+            f.write(f"\nFMS_AUTH_SECRET={settings.auth_secret}\n")
+    except OSError:
+        pass  # in-memory secret still works for this process
 
 
 def load_bank_config() -> dict:

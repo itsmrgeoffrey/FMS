@@ -16,15 +16,17 @@ each is set. On save, empty secret fields mean "keep the current value".
 import logging
 
 import yaml
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from backend.auth import require_api_key
+from backend.auth import require_user
 from backend.config import ROOT, bank_config, settings
+from backend.models import User
+from backend.routers import audit
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_user)])
 
 _YAML_PATH = ROOT / "bank_config.yaml"
 _ENV_PATH = ROOT / ".env"
@@ -168,7 +170,7 @@ async def get_settings():
 
 
 @router.put("")
-async def update_settings(body: SettingsUpdate):
+async def update_settings(body: SettingsUpdate, request: Request, user: User = Depends(require_user)):
     restart_required = False
     data = _read_yaml()
 
@@ -245,5 +247,11 @@ async def update_settings(body: SettingsUpdate):
     if env_updates:
         _update_env(env_updates)
 
-    log.info(f"Settings updated via API (restart_required={restart_required})")
+    sections = [k for k in ("database", "tables", "monitoring", "institution", "alerts", "llm", "security")
+                if getattr(body, k) is not None]
+    await audit.record(
+        user.username, "SETTINGS_UPDATED",
+        detail=", ".join(sections) or None, request=request,
+    )
+    log.info(f"Settings updated by {user.username} (restart_required={restart_required})")
     return {"saved": True, "restart_required": restart_required}

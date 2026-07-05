@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.auth import require_user
 from backend.database import get_db
-from backend.models import FraudCase
+from backend.models import FraudCase, User
 from backend.schemas import StatsOut, HealthOut
 from backend.services import poller
 
@@ -12,7 +13,7 @@ router = APIRouter(tags=["stats"])
 
 
 @router.get("/stats", response_model=StatsOut)
-async def get_stats(db: AsyncSession = Depends(get_db)):
+async def get_stats(db: AsyncSession = Depends(get_db), _user: User = Depends(require_user)):
     today_start = datetime.combine(date.today(), datetime.min.time())
 
     async def count(filters):

@@ -1,15 +1,16 @@
 from datetime import datetime, date
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import require_api_key, resolve_actor
+from backend.auth import require_user
 from backend.database import get_db
-from backend.models import FraudCase, CaseAction
+from backend.models import FraudCase, CaseAction, User
+from backend.routers import audit
 from backend.schemas import FraudCaseOut, FraudCaseListItem, CaseActionCreate, CasesPage
 
-router = APIRouter(prefix="/cases", tags=["cases"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/cases", tags=["cases"], dependencies=[Depends(require_user)])
 
 STATUS_TRANSITIONS = {
     "DISMISSED": "DISMISSED",
@@ -80,8 +81,9 @@ async def get_case(case_id: str, db: AsyncSession = Depends(get_db)):
 async def add_action(
     case_id: str,
     body: CaseActionCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    x_actor: str | None = Header(default=None),
+    user: User = Depends(require_user),
 ):
     result = await db.execute(
         select(FraudCase)
@@ -107,12 +109,17 @@ async def add_action(
     action = CaseAction(
         case_id=case_id,
         action=action_key,
-        actor=resolve_actor(body.actor, x_actor),
+        actor=user.username,   # trusted: from the authenticated session, not client input
         note=body.note,
     )
     db.add(action)
     await db.commit()
     await db.refresh(case)
+
+    await audit.record(
+        user.username, f"CASE_{action_key}", target=case_id,
+        detail=body.note, request=request,
+    )
 
     result2 = await db.execute(
         select(FraudCase)

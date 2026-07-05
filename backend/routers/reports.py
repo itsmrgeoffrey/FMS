@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import require_api_key
+from backend.auth import require_user
 from backend.config import bank_config
 from backend.database import get_db
 from backend.models import FraudCase
@@ -29,7 +29,7 @@ from backend.models import FraudCase
 # (31 CFR 1020.320(b)(3)); FMS uses the case creation time as the detection date.
 SAR_FILING_WINDOW_DAYS = 30
 
-router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(require_user)])
 
 _CTR_COLUMNS = [
     "case_id", "created_at", "account_id", "direction", "currency", "amount",

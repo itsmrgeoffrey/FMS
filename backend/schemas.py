@@ -96,3 +96,41 @@ class CasesPage(BaseModel):
     total: int
     page: int
     limit: int
+
+
+class SignupRequest(BaseModel):
+    username: str
+    password: str
+    full_name: str | None = None
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    full_name: str | None
+    role: str
+    created_at: datetime
+    last_login_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class TokenResponse(BaseModel):
+    token: str
+    user: UserOut
+
+
+class AuditOut(BaseModel):
+    id: int
+    username: str
+    action: str
+    target: str | None
+    detail: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
