@@ -80,6 +80,7 @@ export interface AuditEntry {
   action: string;
   target: string | null;
   detail: string | null;
+  ip: string | null;
   created_at: string;
 }
 
