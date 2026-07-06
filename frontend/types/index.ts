@@ -84,6 +84,35 @@ export interface AuditEntry {
   created_at: string;
 }
 
+export interface Dashboard {
+  totals: {
+    total_cases: number;
+    open_cases: number;
+    flagged_today: number;
+    confirmed_fraud: number;
+    sanctions_hits: number;
+    ctr_required: number;
+    sar_open: number;
+    sar_soonest_deadline_days: number | null;
+  };
+  activity: { date: string; flagged: number; clean: number }[];
+  fraud_types: { type: string; count: number }[];
+  risk_levels: { level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; count: number }[];
+  amounts_open: { currency: string; total: number }[];
+  attention: {
+    id: string;
+    account_id: string;
+    amount: number;
+    currency: string;
+    direction: string;
+    fraud_type: string | null;
+    risk_score: number | null;
+    sanctions_hit: boolean;
+    sar_recommended: boolean;
+    created_at: string;
+  }[];
+}
+
 export interface Stats {
   flagged_today: number;
   high_confidence: number;
