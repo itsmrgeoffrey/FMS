@@ -108,6 +108,13 @@ async def require_user(
     return user
 
 
+async def require_admin(user: User = Depends(require_user)) -> User:
+    """Require a logged-in user with the admin role."""
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
 async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     """Machine auth for ingestion. No-op when FMS_API_KEY is not configured."""
     api_key = settings.fms_api_key.strip()

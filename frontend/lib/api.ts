@@ -107,4 +107,17 @@ export const api = {
 
   // Activity log
   getAudit: (limit = 50): Promise<AuditEntry[]> => req(`/audit?limit=${limit}`),
+
+  // Account + user management
+  changePassword: (current_password: string, new_password: string): Promise<{ changed: boolean }> =>
+    req("/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password, new_password }),
+    }),
+  listUsers: (): Promise<AuthUser[]> => req("/auth/users"),
+  resetUserPassword: (userId: string): Promise<{ username: string; temp_password: string }> =>
+    req(`/auth/users/${userId}/reset-password`, { method: "POST" }),
+  toggleUserActive: (userId: string): Promise<{ username: string; is_active: boolean }> =>
+    req(`/auth/users/${userId}/toggle-active`, { method: "POST" }),
 };

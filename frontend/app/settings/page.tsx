@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, auth } from "@/lib/api";
+import type { AuthUser } from "@/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -62,6 +63,150 @@ function Section({
         </button>
       </div>
       {children}
+    </section>
+  );
+}
+
+function MyAccountSection() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function change() {
+    setMsg(null);
+    if (next !== confirm) {
+      setMsg({ ok: false, text: "New passwords do not match" });
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.changePassword(current, next);
+      setMsg({ ok: true, text: "Password changed." });
+      setCurrent(""); setNext(""); setConfirm("");
+    } catch (e) {
+      setMsg({ ok: false, text: String(e).replace(/^Error:\s*API error \d+:\s*/, "") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-700">My Account</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Change your password</p>
+        </div>
+        <button
+          onClick={change}
+          disabled={busy || !current || !next}
+          className="px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
+        >
+          {busy ? "Saving..." : "Change password"}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Field label="Current password" value={current} type="password" onChange={setCurrent} />
+        <Field label="New password" value={next} type="password" onChange={setNext} hint="At least 8 characters" />
+        <Field label="Confirm new password" value={confirm} type="password" onChange={setConfirm} />
+      </div>
+      {msg && (
+        <p className={`text-sm mt-3 ${msg.ok ? "text-green-600" : "text-red-600"}`}>{msg.text}</p>
+      )}
+    </section>
+  );
+}
+
+function UsersSection() {
+  const [users, setUsers] = useState<AuthUser[]>([]);
+  const [temp, setTemp] = useState<{ username: string; temp_password: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const me = auth.user();
+
+  function load() {
+    api.listUsers().then(setUsers).catch((e) => setError(String(e)));
+  }
+  useEffect(load, []);
+
+  async function reset(u: AuthUser) {
+    if (!window.confirm(`Reset password for "${u.username}"? Their current password stops working immediately.`)) return;
+    try {
+      setTemp(await api.resetUserPassword(u.id));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function toggle(u: AuthUser) {
+    try {
+      await api.toggleUserActive(u.id);
+      load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-gray-700">Users</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Password recovery: reset a user&apos;s password here and hand them the temporary one — they should change it after signing in.
+        </p>
+      </div>
+
+      {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+
+      {temp && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+          Temporary password for <span className="font-semibold">{temp.username}</span>:{" "}
+          <code className="font-mono bg-white px-2 py-0.5 rounded border border-amber-200">{temp.temp_password}</code>
+          <span className="block text-xs text-amber-600 mt-1">Shown once — copy it now and share it securely.</span>
+        </div>
+      )}
+
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
+            <th className="py-2 pr-4 font-medium">User</th>
+            <th className="py-2 pr-4 font-medium">Role</th>
+            <th className="py-2 pr-4 font-medium">Status</th>
+            <th className="py-2 pr-4 font-medium">Last login</th>
+            <th className="py-2 font-medium" />
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((u) => (
+            <tr key={u.id} className="border-b border-gray-50">
+              <td className="py-2.5 pr-4">
+                <span className="font-medium text-gray-800">{u.username}</span>
+                {u.full_name && <span className="text-gray-400 ml-2 text-xs">{u.full_name}</span>}
+              </td>
+              <td className="py-2.5 pr-4 capitalize text-gray-600">{u.role}</td>
+              <td className="py-2.5 pr-4">
+                <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${u.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                  {u.is_active ? "active" : "disabled"}
+                </span>
+              </td>
+              <td className="py-2.5 pr-4 text-gray-500 text-xs">
+                {u.last_login_at ? new Date(u.last_login_at + "Z").toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "—"}
+              </td>
+              <td className="py-2.5 text-right space-x-3 whitespace-nowrap">
+                <button onClick={() => reset(u)} className="text-xs font-medium text-blue-600 hover:text-blue-800">
+                  Reset password
+                </button>
+                {u.id !== me?.id && (
+                  <button onClick={() => toggle(u)} className="text-xs font-medium text-gray-500 hover:text-gray-700">
+                    {u.is_active ? "Disable" : "Enable"}
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }
@@ -352,6 +497,12 @@ export default function SettingsPage() {
           />
         </div>
       </Section>
+
+      {/* My account — password change */}
+      <MyAccountSection />
+
+      {/* Users — admin-only management & password recovery */}
+      {auth.user()?.role === "admin" && <UsersSection />}
 
       {/* Security */}
       <Section

@@ -114,6 +114,7 @@ class UserOut(BaseModel):
     username: str
     full_name: str | None
     role: str
+    is_active: bool = True
     created_at: datetime
     last_login_at: datetime | None
 
