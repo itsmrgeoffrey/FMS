@@ -1,4 +1,5 @@
 """Signup / login / current-user / password + user management endpoints."""
+import logging
 import secrets
 from datetime import datetime
 
@@ -14,6 +15,7 @@ from backend.routers import audit
 from backend.schemas import LoginRequest, SignupRequest, TokenResponse, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+log = logging.getLogger(__name__)
 
 MIN_PASSWORD_LEN = 8
 
@@ -58,7 +60,9 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     username = body.username.strip().lower()
     user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
     if not user or not verify_password(body.password, user.password_hash):
-        # Do not reveal whether the username exists.
+        # Failed login — logged for security monitoring (username only, never the password).
+        log.warning(f"Failed login attempt for username={username!r}")
+        await audit.record(username, "LOGIN_FAILED", request=request)
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
