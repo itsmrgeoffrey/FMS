@@ -50,6 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const isLogin = pathname === "/login";
 
@@ -80,33 +81,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <p className="text-white font-bold text-lg tracking-tight">FMS</p>
           <p className="text-slate-400 text-xs mt-0.5">Fraud Monitoring System</p>
         </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.section}>
-              <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                {group.section}
-              </p>
-              <div className="space-y-1">
-                {group.items.map((n) => {
-                  const active = pathname === n.href || pathname.startsWith(n.href + "/");
-                  return (
-                    <Link
-                      key={n.href}
-                      href={n.href}
-                      className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                        active ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                      }`}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={n.d} />
-                      </svg>
-                      {n.label}
-                    </Link>
-                  );
-                })}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
+          {NAV_GROUPS.map((group) => {
+            const isCollapsed = collapsed[group.section];
+            return (
+              <div key={group.section}>
+                <button
+                  onClick={() => setCollapsed((c) => ({ ...c, [group.section]: !c[group.section] }))}
+                  className="w-full flex items-center justify-between px-3 mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  {group.section}
+                  <svg
+                    className={`w-3 h-3 transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {!isCollapsed && (
+                  <div className="space-y-1">
+                    {group.items.map((n) => {
+                      const active = pathname === n.href || pathname.startsWith(n.href + "/");
+                      return (
+                        <Link
+                          key={n.href}
+                          href={n.href}
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                            active ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                          }`}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={n.d} />
+                          </svg>
+                          {n.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
         <div className="px-4 py-4 border-t border-slate-700">
           <p className="text-white text-sm font-medium truncate">{user.full_name || user.username}</p>
