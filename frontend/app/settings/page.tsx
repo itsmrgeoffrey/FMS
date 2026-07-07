@@ -220,11 +220,43 @@ function UsersSection() {
   );
 }
 
+function ComingSoon({ title, blurb, planned }: { title: string; blurb: string; planned: string[] }) {
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+      <div className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500 mb-3">
+        Planned
+      </div>
+      <h2 className="text-base font-semibold text-gray-700">{title}</h2>
+      <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">{blurb}</p>
+      <ul className="mt-4 inline-block text-left text-sm text-gray-600 space-y-1">
+        {planned.map((p) => (
+          <li key={p} className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-gray-300 inline-block" />{p}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+type AdminTab = "system" | "account" | "users" | "roles" | "permissions" | "integrations";
+
+const TABS: { key: AdminTab; label: string; adminOnly?: boolean; planned?: boolean }[] = [
+  { key: "system", label: "System Settings" },
+  { key: "account", label: "My Account" },
+  { key: "users", label: "Users", adminOnly: true },
+  { key: "roles", label: "Roles", adminOnly: true, planned: true },
+  { key: "permissions", label: "Permissions", adminOnly: true, planned: true },
+  { key: "integrations", label: "API Integrations", adminOnly: true, planned: true },
+];
+
 export default function SettingsPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [tab, setTab] = useState<AdminTab>("system");
+  const isAdmin = auth.user()?.role === "admin";
 
   useEffect(() => {
     api.getSettings().then(setData).catch((e) => setError(String(e)));
@@ -276,10 +308,24 @@ export default function SettingsPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Configure FMS without touching config files. Secret fields show as set/not set — leave them blank to keep the current value.
-        </p>
+        <h1 className="text-2xl font-bold text-gray-900">Administration</h1>
+        <p className="text-sm text-gray-500 mt-1">Manage system configuration, users, and access.</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex flex-wrap gap-1 border-b border-gray-200">
+        {TABS.filter((t) => !t.adminOnly || isAdmin).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => { setTab(t.key); setNotice(null); setError(null); }}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.key ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t.label}
+            {t.planned && <span className="ml-1 text-[10px] text-gray-400">soon</span>}
+          </button>
+        ))}
       </div>
 
       {notice && (
@@ -289,6 +335,7 @@ export default function SettingsPage() {
         <div className="text-sm px-4 py-3 rounded-lg bg-red-50 text-red-700 border border-red-200">{error}</div>
       )}
 
+      {tab === "system" && (<>
       {/* Bank database */}
       <Section
         title="Bank Database"
@@ -507,12 +554,6 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      {/* My account — password change */}
-      <MyAccountSection />
-
-      {/* Users — admin-only management & password recovery */}
-      {auth.user()?.role === "admin" && <UsersSection />}
-
       {/* Security */}
       <Section
         title="Security"
@@ -531,6 +572,35 @@ export default function SettingsPage() {
           />
         </div>
       </Section>
+      </>)}
+
+      {tab === "account" && <MyAccountSection />}
+
+      {tab === "users" && isAdmin && <UsersSection />}
+
+      {tab === "roles" && (
+        <ComingSoon
+          title="Roles"
+          blurb="FMS currently uses two built-in roles — admin and analyst — which gate access today. A UI to define and assign custom roles is planned."
+          planned={["Built-in: admin, analyst (active now)", "Create custom roles", "Assign roles per user"]}
+        />
+      )}
+
+      {tab === "permissions" && (
+        <ComingSoon
+          title="Permissions"
+          blurb="Access is role-based today (admin vs. analyst). Granular, per-capability permissions are planned."
+          planned={["Per-action permissions (view / action / configure)", "Permission sets attached to roles", "Least-privilege presets"]}
+        />
+      )}
+
+      {tab === "integrations" && (
+        <ComingSoon
+          title="API Integrations"
+          blurb="Manage how external systems feed and receive data. The ingestion API key lives under System Settings → Security today; richer integration management is planned."
+          planned={["Ingestion API keys & rotation", "Outbound webhooks (new case / sanctions hit)", "Connectors for core banking / payment processors"]}
+        />
+      )}
     </div>
   );
 }
