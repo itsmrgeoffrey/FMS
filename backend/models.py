@@ -69,6 +69,7 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String, unique=True, index=True, nullable=True)
     full_name: Mapped[str | None] = mapped_column(String, nullable=True)
     password_hash: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String, default="analyst")  # analyst / admin

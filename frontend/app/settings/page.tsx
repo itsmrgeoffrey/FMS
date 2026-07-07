@@ -121,7 +121,7 @@ function MyAccountSection() {
 
 function UsersSection() {
   const [users, setUsers] = useState<AuthUser[]>([]);
-  const [temp, setTemp] = useState<{ username: string; temp_password: string } | null>(null);
+  const [temp, setTemp] = useState<{ username: string; email: string | null; emailed: boolean; temp_password: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const me = auth.user();
 
@@ -153,7 +153,7 @@ function UsersSection() {
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-gray-700">Users</h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Password recovery: reset a user&apos;s password here and hand them the temporary one — they should change it after signing in.
+          Password recovery: reset a user&apos;s password here. If email is configured it&apos;s sent to them; otherwise it&apos;s shown once below to hand over securely.
         </p>
       </div>
 
@@ -161,9 +161,18 @@ function UsersSection() {
 
       {temp && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
-          Temporary password for <span className="font-semibold">{temp.username}</span>:{" "}
-          <code className="font-mono bg-white px-2 py-0.5 rounded border border-amber-200">{temp.temp_password}</code>
-          <span className="block text-xs text-amber-600 mt-1">Shown once — copy it now and share it securely.</span>
+          {temp.emailed ? (
+            <>A temporary password was <span className="font-semibold">emailed to {temp.email}</span> for {temp.username}. They should change it after signing in.</>
+          ) : (
+            <>
+              Temporary password for <span className="font-semibold">{temp.username}</span>:{" "}
+              <code className="font-mono bg-white px-2 py-0.5 rounded border border-amber-200">{temp.temp_password}</code>
+              <span className="block text-xs text-amber-600 mt-1">
+                {temp.email ? "Email isn't configured, so " : "No email on file, so "}
+                shown once — copy it now and share it securely.
+              </span>
+            </>
+          )}
         </div>
       )}
 

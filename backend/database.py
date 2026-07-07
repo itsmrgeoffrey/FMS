@@ -29,6 +29,9 @@ _ADDED_COLUMNS = {
         ("sanctions_hit", "BOOLEAN DEFAULT 0"),
         ("sanctions_detail", "TEXT"),
     ],
+    "users": [
+        ("email", "TEXT"),
+    ],
 }
 
 
@@ -55,6 +58,15 @@ async def _run_migrations(conn) -> None:
         log.warning(
             f"Could not create uq_case_source_txn index (existing duplicates?): {e}"
         )
+
+    # Unique index on user email (multiple NULLs allowed in SQLite for pre-existing
+    # accounts that don't have an email yet).
+    try:
+        await conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email)"
+        )
+    except Exception as e:
+        log.warning(f"Could not create uq_users_email index (existing duplicate emails?): {e}")
 
 
 async def init_db():

@@ -68,6 +68,7 @@ export interface CasesPage {
 export interface AuthUser {
   id: string;
   username: string;
+  email: string | null;
   full_name: string | null;
   role: "admin" | "analyst";
   is_active: boolean;

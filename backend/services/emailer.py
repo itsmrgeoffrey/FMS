@@ -7,6 +7,54 @@ from backend.config import settings
 log = logging.getLogger(__name__)
 
 
+def is_configured() -> bool:
+    """True if outbound email (Gmail SMTP) is set up."""
+    return bool(settings.gmail_user and settings.gmail_app_password)
+
+
+def _send(to_email: str, subject: str, html: str) -> bool:
+    """Send one HTML email. Returns True on success, False otherwise."""
+    if not is_configured():
+        log.warning("Email not configured — cannot send")
+        return False
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.gmail_user
+    msg["To"] = to_email
+    msg.attach(MIMEText(html, "html"))
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(settings.gmail_user, settings.gmail_app_password)
+            server.sendmail(settings.gmail_user, to_email, msg.as_string())
+        log.info(f"Email sent to {to_email}: {subject}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send email to {to_email}: {e}")
+        return False
+
+
+def send_password_email(to_email: str, display_name: str, temp_password: str, by_admin: bool) -> bool:
+    """Send a temporary password after a reset. Returns True if delivered."""
+    who = "An administrator has reset your password" if by_admin else "You requested a password reset"
+    subject = "FMS — your temporary password"
+    html = f"""
+    <html><body style="font-family: Arial, sans-serif; color:#1a1a1a;">
+      <div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:16px;border-radius:8px;margin-bottom:16px;">
+        <h2 style="margin:0;color:#1e40af;">FMS password reset</h2>
+      </div>
+      <p>Hello {display_name},</p>
+      <p>{who}. Sign in with this temporary password, then change it right away under
+         <strong>Settings &rarr; My Account</strong>:</p>
+      <p style="font-size:20px;font-weight:700;font-family:monospace;background:#f3f4f6;
+         padding:12px 16px;border-radius:8px;display:inline-block;letter-spacing:1px;">{temp_password}</p>
+      <p style="color:#6b7280;font-size:13px;">If you didn't expect this, contact your administrator.</p>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;">
+      <p style="color:#9ca3af;font-size:12px;">FMS — Fraud Monitoring System</p>
+    </body></html>
+    """
+    return _send(to_email, subject, html)
+
+
 def send_fraud_alert(case: dict) -> None:
     if not settings.gmail_user or not settings.gmail_app_password:
         log.warning("Email not configured — skipping alert")

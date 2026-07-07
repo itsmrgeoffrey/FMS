@@ -99,19 +99,24 @@ class CasesPage(BaseModel):
 
 
 class SignupRequest(BaseModel):
-    username: str
+    email: str
     password: str
     full_name: str | None = None
 
 
 class LoginRequest(BaseModel):
-    username: str
+    email: str
     password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
 
 
 class UserOut(BaseModel):
     id: str
     username: str
+    email: str | None = None
     full_name: str | None
     role: str
     is_active: bool = True

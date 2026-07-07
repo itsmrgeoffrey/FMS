@@ -100,17 +100,23 @@ export const api = {
   sarReportUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params),
 
   // Auth
-  signup: (username: string, password: string, full_name?: string): Promise<{ token: string; user: AuthUser }> =>
+  signup: (email: string, password: string, full_name?: string): Promise<{ token: string; user: AuthUser }> =>
     req("/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, full_name }),
+      body: JSON.stringify({ email, password, full_name }),
     }),
-  login: (username: string, password: string): Promise<{ token: string; user: AuthUser }> =>
+  login: (email: string, password: string): Promise<{ token: string; user: AuthUser }> =>
     req("/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ email, password }),
+    }),
+  forgotPassword: (email: string): Promise<{ message: string; email_configured: boolean }> =>
+    req("/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
     }),
 
   // Activity log
@@ -124,7 +130,7 @@ export const api = {
       body: JSON.stringify({ current_password, new_password }),
     }),
   listUsers: (): Promise<AuthUser[]> => req("/auth/users"),
-  resetUserPassword: (userId: string): Promise<{ username: string; temp_password: string }> =>
+  resetUserPassword: (userId: string): Promise<{ username: string; email: string | null; emailed: boolean; temp_password: string | null }> =>
     req(`/auth/users/${userId}/reset-password`, { method: "POST" }),
   toggleUserActive: (userId: string): Promise<{ username: string; is_active: boolean }> =>
     req(`/auth/users/${userId}/toggle-active`, { method: "POST" }),
