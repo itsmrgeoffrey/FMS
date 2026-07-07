@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_db
-from backend.routers import cases, stats, ws, transactions, reports, audit, auth_routes
+from backend.routers import cases, stats, ws, transactions, reports, audit, auth_routes, insights
 from backend.routers import settings as settings_routes
 from backend.services import poller
 
@@ -46,3 +46,4 @@ app.include_router(reports.router)
 app.include_router(settings_routes.router)
 app.include_router(auth_routes.router)
 app.include_router(audit.router)
+app.include_router(insights.router)

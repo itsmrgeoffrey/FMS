@@ -115,6 +115,35 @@ export interface Dashboard {
   }[];
 }
 
+export interface Customer {
+  account_id: string;
+  transactions: number;
+  flagged: number;
+  open: number;
+  sanctions_hits: number;
+  sar_count: number;
+  max_risk: number | null;
+  total_amount: number;
+  currency: string | null;
+  last_activity: string | null;
+}
+
+export interface RulesConfig {
+  regulatory_thresholds: {
+    ctr_by_currency: Record<string, number>;
+    sar_ratio_of_ctr: number;
+    note: string;
+  };
+  detection_parameters: {
+    structuring_band_ratio: number;
+    rolling_window_days: number;
+    smurfing_window_hours: number;
+  };
+  scoring_components: { name: string; points: string; detail: string }[];
+  risk_levels: { level: string; range: string }[];
+  sanctions: { list: string; match_threshold: string; note: string };
+}
+
 export interface Stats {
   flagged_today: number;
   high_confidence: number;

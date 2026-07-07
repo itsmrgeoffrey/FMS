@@ -1,4 +1,4 @@
-import type { CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard } from "@/types";
+import type { CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig } from "@/types";
 
 const BASE = "/api";
 // Optional — only needed if the backend has FMS_API_KEY set (machine auth).
@@ -86,6 +86,11 @@ export const api = {
 
   getDashboard: (): Promise<Dashboard> => req<Dashboard>("/stats/dashboard"),
 
+  getCustomers: (limit = 100): Promise<{ count: number; items: Customer[] }> =>
+    req(`/customers?limit=${limit}`),
+
+  getRules: (): Promise<RulesConfig> => req<RulesConfig>("/rules"),
+
   getSettings: (): Promise<Record<string, unknown>> => req("/settings"),
 
   updateSettings: (payload: Record<string, unknown>): Promise<{ saved: boolean; restart_required: boolean }> =>
@@ -98,6 +103,8 @@ export const api = {
   // Regulatory filing exports (CSV download links).
   ctrReportUrl: (params?: Record<string, string | undefined>) => reportUrl("ctr", params),
   sarReportUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params),
+  getCtrReport: (): Promise<{ count: number; items: Record<string, unknown>[] }> => req("/reports/ctr"),
+  getSarReport: (): Promise<{ count: number; items: Record<string, unknown>[] }> => req("/reports/sar"),
 
   // Auth
   signup: (email: string, password: string, full_name?: string): Promise<{ token: string; user: AuthUser }> =>
