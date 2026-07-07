@@ -1,10 +1,8 @@
 "use client";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { api, auth } from "@/lib/api";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -23,7 +21,10 @@ export default function LoginPage() {
           ? await api.login(username, password)
           : await api.signup(username, password, fullName || undefined);
       auth.set(res.token, res.user);
-      router.push("/cases");
+      // Full navigation (not router.push) so the auth gate re-reads the fresh
+      // session on a clean mount — avoids the soft-navigation bounce loop.
+      window.location.assign("/dashboard");
+      return;
     } catch (err) {
       const msg = String(err).replace(/^Error:\s*API error \d+:\s*/, "");
       setError(msg.includes("Not authenticated") ? "Invalid username or password" : msg);

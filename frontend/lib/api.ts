@@ -12,7 +12,15 @@ export const auth = {
   user: (): AuthUser | null => {
     if (typeof window === "undefined") return null;
     const raw = localStorage.getItem(USER_KEY);
-    return raw ? (JSON.parse(raw) as AuthUser) : null;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as AuthUser;
+    } catch {
+      // Corrupt stored session — clear it so the app doesn't get wedged.
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      return null;
+    }
   },
   set: (token: string, user: AuthUser) => {
     localStorage.setItem(TOKEN_KEY, token);
