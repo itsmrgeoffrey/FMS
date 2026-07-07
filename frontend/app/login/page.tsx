@@ -113,18 +113,7 @@ export default function LoginPage() {
 
           {mode !== "forgot" && (
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs text-gray-500 font-medium">Password</label>
-                {mode === "login" && (
-                  <button
-                    type="button"
-                    onClick={() => switchMode("forgot")}
-                    className="text-xs text-blue-600 hover:text-blue-800"
-                  >
-                    Forgot password?
-                  </button>
-                )}
-              </div>
+              <label className="block text-xs text-gray-500 font-medium mb-1">Password</label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
@@ -154,6 +143,17 @@ export default function LoginPage() {
               </div>
               {mode === "signup" && (
                 <p className="text-xs text-gray-400 mt-1">At least 8 characters. The first account created becomes the admin.</p>
+              )}
+              {mode === "login" && (
+                <div className="text-right mt-2">
+                  <button
+                    type="button"
+                    onClick={() => switchMode("forgot")}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
               )}
             </div>
           )}
