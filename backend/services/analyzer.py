@@ -856,23 +856,24 @@ No jargon. No scores. No internal system names. Use the actual numbers from the 
 Respond with ONLY this JSON:
 {{"summary": "your 2-3 sentence explanation here"}}"""
 
-    # The LLM only produces the human-readable prose. Everything that determines
-    # whether a case is raised (risk score, CTR/SAR, reasons) is already computed
-    # deterministically above, so an LLM outage must never block a case — we fall
-    # back to a deterministic summary instead of letting the exception propagate.
+    # AI summaries are opt-in (FMS_AI_SUMMARIES). By DEFAULT the deterministic
+    # engine writes the summary and no transaction data leaves the host. When
+    # enabled, the LLM only produces the human-readable prose — it never
+    # influences whether a case is raised (that is all computed above).
     summary = ""
-    try:
-        raw = await _generate_summary_text(SYSTEM_PROMPT, summary_prompt)
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
+    if settings.ai_summaries.strip().lower() in ("on", "true", "1", "yes"):
         try:
-            summary = json.loads(raw).get("summary", "") or raw
-        except Exception:
-            summary = raw
-    except Exception as e:
-        log.warning(f"LLM summary unavailable ({e}) — using deterministic fallback")
+            raw = await _generate_summary_text(SYSTEM_PROMPT, summary_prompt)
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            try:
+                summary = json.loads(raw).get("summary", "") or raw
+            except Exception:
+                summary = raw
+        except Exception as e:
+            log.warning(f"LLM summary unavailable ({e}) — using deterministic fallback")
 
     if not summary:
         summary = _fallback_summary(txn, risk, profile, reasons, ctr)

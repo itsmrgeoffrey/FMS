@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     llm_base_url: str = os.getenv("LLM_BASE_URL", "")
     llm_model: str = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    # AI case summaries are OFF by default. The detection engine is fully
+    # deterministic and needs no AI; enabling this only adds a prose summary.
+    # With a third-party key (Groq) this sends transaction data off-host, so it
+    # is opt-in. A local LLM_BASE_URL keeps data on your infrastructure.
+    ai_summaries: str = os.getenv("FMS_AI_SUMMARIES", "off")
     gmail_user: str = os.getenv("GMAIL_USER", "")
     gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "")
     alert_email: str = os.getenv("ALERT_EMAIL", "")
