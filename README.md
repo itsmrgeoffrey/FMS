@@ -100,6 +100,10 @@ FMS handles sensitive financial data. Use a **read-only** database user, set `FM
 
 Contributions welcome — new database adapters, additional detection signals, and jurisdiction thresholds especially. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Whitepaper
+
+The design rationale — the compliance gap, why determinism over black boxes, the detection methodology, security model, and honest limitations — is written up in [docs/WHITEPAPER.md](docs/WHITEPAPER.md).
+
 ## User manual
 
 A full operator's manual — sign-in, roles, working cases, reports, administration, and troubleshooting — is in [docs/USER_MANUAL.md](docs/USER_MANUAL.md).
