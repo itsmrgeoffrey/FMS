@@ -90,6 +90,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <p className="text-white font-bold text-lg tracking-tight">FMS</p>
           <p className="text-slate-400 text-xs mt-0.5">Fraud Monitoring System</p>
         </div>
+        <div className="px-3 pt-3">
+          <input
+            placeholder="Search account, case…"
+            onKeyDown={(e) => {
+              const v = (e.target as HTMLInputElement).value.trim();
+              if (e.key === "Enter" && v.length >= 2) router.push(`/search?q=${encodeURIComponent(v)}`);
+            }}
+            className="w-full text-sm bg-slate-800 text-slate-200 placeholder-slate-500 border border-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
           {NAV_GROUPS.filter((g) => !g.requires || can(user.role, g.requires)).map((group) => {
             const isCollapsed = collapsed[group.section];

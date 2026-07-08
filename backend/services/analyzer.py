@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from groq import AsyncGroq
 from backend.adapters.base import NormalizedTransaction
-from backend.config import settings
+from backend.config import bank_config, settings
 from backend.services import sanctions
 
 log = logging.getLogger(__name__)
@@ -96,6 +96,35 @@ _BATCH_PATTERN = re.compile(
     r"regular[\s\-]?payment|monthly[\s\-]?payment|quarterly|disbursement)\b",
     re.IGNORECASE,
 )
+
+
+def apply_rule_overrides(rules: dict) -> None:
+    """Apply operator-tuned detection parameters (from bank_config 'rules').
+    Called at import and live from the settings API. Unknown keys are ignored."""
+    global SAR_RATIO, STRUCTURING_BAND_RATIO, ROLLING_WINDOW_DAYS, SMURFING_WINDOW_HOURS
+    if not rules:
+        return
+    if isinstance(rules.get("ctr_thresholds"), dict):
+        for cur, val in rules["ctr_thresholds"].items():
+            try:
+                _CTR_THRESHOLDS[str(cur).upper()] = float(val)
+            except (TypeError, ValueError):
+                pass
+    for key, cast in (("sar_ratio", float), ("structuring_band_ratio", float),
+                      ("rolling_window_days", int), ("smurfing_window_hours", int)):
+        if rules.get(key) is not None:
+            try:
+                value = cast(rules[key])
+            except (TypeError, ValueError):
+                continue
+            if key == "sar_ratio":
+                SAR_RATIO = value
+            elif key == "structuring_band_ratio":
+                STRUCTURING_BAND_RATIO = value
+            elif key == "rolling_window_days":
+                ROLLING_WINDOW_DAYS = value
+            elif key == "smurfing_window_hours":
+                SMURFING_WINDOW_HOURS = value
 
 
 def _ctr_threshold(currency: str) -> float:
@@ -291,9 +320,10 @@ def _assess_sar(
 def _rolling_window(
     txn: NormalizedTransaction,
     history: list[NormalizedTransaction],
-    days: int = ROLLING_WINDOW_DAYS,
+    days: int | None = None,
 ) -> tuple[float, int]:
     """Total same-direction amount for this account in the last N days (including current txn)."""
+    days = days if days is not None else ROLLING_WINDOW_DAYS  # read live (UI-tunable)
     if not isinstance(txn.timestamp, datetime):
         return txn.amount, 1
     cutoff = txn.timestamp - timedelta(days=days)
@@ -309,9 +339,10 @@ def _rolling_window(
 def _inbound_sources(
     txn: NormalizedTransaction,
     history: list[NormalizedTransaction],
-    hours: int = SMURFING_WINDOW_HOURS,
+    hours: int | None = None,
 ) -> tuple[int, float]:
     """For INWARD txns: (distinct senders, total received) in the last N hours."""
+    hours = hours if hours is not None else SMURFING_WINDOW_HOURS  # read live (UI-tunable)
     if txn.direction != "INWARD" or not isinstance(txn.timestamp, datetime):
         return 0, 0.0
     cutoff = txn.timestamp - timedelta(hours=hours)
@@ -905,3 +936,7 @@ def _format_history(txns: list[NormalizedTransaction]) -> str:
             f"{t.currency} {t.amount:>12,.2f} | {(t.counterparty_name or 'Unknown'):<22} | {t.channel or '-'}"
         )
     return "\n".join(lines)
+
+
+# Apply operator-tuned rule overrides persisted in bank_config.yaml.
+apply_rule_overrides(bank_config.get("rules", {}) or {})

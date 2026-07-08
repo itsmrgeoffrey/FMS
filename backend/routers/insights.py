@@ -111,6 +111,61 @@ async def analytics(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     }
 
 
+from pydantic import BaseModel
+
+
+class ScreenRequest(BaseModel):
+    names: list[str]
+
+
+@router.post("/screening/check")
+async def screening_check(body: ScreenRequest, _user: User = Depends(require_user)):
+    """Batch-screen arbitrary names (e.g. your customer base) against the OFAC
+    SDN list (+ configured PEP list). Returns only the hits."""
+    if len(body.names) > 5000:
+        return {"error": "Maximum 5,000 names per request"}
+    hits = []
+    for name in body.names:
+        m = S.screen(name)
+        if m:
+            hits.append({
+                "query": name, "matched_name": m.matched_name, "score": m.score,
+                "list_type": m.list_type, "program": m.program, "source": m.source,
+            })
+    return {"screened": len(body.names), "hits": hits}
+
+
+@router.get("/search")
+async def search(q: str = Query(..., min_length=2, max_length=100),
+                 db: AsyncSession = Depends(get_db),
+                 _user: User = Depends(require_user)):
+    """Global search across cases by account, counterparty, case id, or reference."""
+    like = f"%{q}%"
+    rows = (await db.execute(
+        select(FraudCase)
+        .where(
+            FraudCase.account_id.like(like)
+            | FraudCase.counterparty_name.like(like)
+            | FraudCase.counterparty_account.like(like)
+            | FraudCase.reference.like(like)
+            | FraudCase.id.like(f"{q}%")
+        )
+        .order_by(FraudCase.created_at.desc())
+        .limit(50)
+    )).scalars().all()
+    return {
+        "query": q,
+        "count": len(rows),
+        "items": [
+            {"id": c.id, "account_id": c.account_id, "amount": c.amount, "currency": c.currency,
+             "direction": c.direction, "counterparty_name": c.counterparty_name,
+             "fraud_type": c.fraud_type, "risk_score": c.risk_score, "status": c.status,
+             "created_at": str(c.created_at)}
+            for c in rows
+        ],
+    }
+
+
 @router.get("/rules")
 async def rules(_user: User = Depends(require_user)):
     """Transparent view of the detection engine's thresholds and scoring rules.

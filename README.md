@@ -14,7 +14,7 @@ Financial-crime detection protects the integrity of the payment system — money
 
 ## What it does
 
-- **Real-time monitoring** — polls your core/transaction database (read-only) and analyzes every new transaction as it lands.
+- **Two ingestion modes** — poll your core/transaction database read-only (MySQL, SQL Server, PostgreSQL, Oracle), **or push events to the ingestion API** (`POST /ingest/transactions`, API-key auth) and receive the risk verdict synchronously — no database access required.
 - **Transparent risk engine** — a fully deterministic scorer (no black box) covering:
   - Near-threshold "structuring" amounts and repeated near-misses
   - Velocity clustering across a rolling window

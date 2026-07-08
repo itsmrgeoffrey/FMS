@@ -87,6 +87,7 @@ class SecuritySettings(BaseModel):
 class SettingsUpdate(BaseModel):
     database: DatabaseSettings | None = None
     tables: dict | None = None             # full tables mapping as edited
+    rules: dict | None = None              # detection-rule overrides (live-applied)
     monitoring: MonitoringSettings | None = None
     institution: InstitutionSettings | None = None
     alerts: AlertSettings | None = None
@@ -234,6 +235,14 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
         data["tables"] = body.tables
         restart_required = True
 
+    if body.rules is not None:
+        existing_rules = data.setdefault("rules", {})
+        existing_rules.update(body.rules)
+        # Applies live — the engine reads these at call time.
+        from backend.services import analyzer
+        analyzer.apply_rule_overrides(existing_rules)
+        bank_config["rules"] = dict(existing_rules)
+
     if body.monitoring is not None:
         mon = data.setdefault("monitoring", {})
         if body.monitoring.poll_interval_seconds is not None:
@@ -252,7 +261,7 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
         # Applies live — FinCEN worksheets read institution at request time.
         bank_config["institution"] = dict(inst)
 
-    if body.database is not None or body.tables is not None or body.monitoring is not None or body.institution is not None:
+    if any(x is not None for x in (body.database, body.tables, body.monitoring, body.institution, body.rules)):
         _write_yaml(data)
 
     env_updates: dict[str, str] = {}
@@ -293,7 +302,7 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
     if env_updates:
         _update_env(env_updates)
 
-    sections = [k for k in ("database", "tables", "monitoring", "institution", "alerts", "llm", "security")
+    sections = [k for k in ("database", "tables", "rules", "monitoring", "institution", "alerts", "llm", "security")
                 if getattr(body, k) is not None]
     detail = ", ".join(sections) or None
     if db_changes:

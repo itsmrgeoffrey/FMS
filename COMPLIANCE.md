@@ -37,6 +37,10 @@ FMS keeps these two tracks separate, because they are separate obligations:
 
 The engine models both independently so a compliance officer sees the right obligation for the right reason.
 
+## Record retention
+
+The BSA requires institutions to retain SAR/CTR filings and supporting documentation for **five years** (31 CFR 1010.430, 1020.320(d)). FMS **retains all cases, case actions, and audit-log entries indefinitely and never deletes them automatically** — deleting compliance records is an operator decision that should only be made against your institution's retention policy, and never before the five-year mark. Back up the FMS application database on the same schedule as your other books and records.
+
 ## What FMS does *not* do
 
 - It does not transmit anything to FinCEN or any regulator (no BSA E-Filing integration).

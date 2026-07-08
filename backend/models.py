@@ -95,6 +95,29 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
+class IngestedTransaction(Base):
+    """Transactions received via the push API — FMS's own history store for
+    institutions that feed us events instead of granting database access."""
+    __tablename__ = "ingested_transactions"
+    __table_args__ = (
+        UniqueConstraint("external_id", name="uq_ingested_external_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    external_id: Mapped[str] = mapped_column(String(128))       # caller's transaction id
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    amount: Mapped[float] = mapped_column(Float)
+    direction: Mapped[str] = mapped_column(String(10))
+    timestamp: Mapped[datetime] = mapped_column(DateTime, index=True)
+    counterparty_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    channel: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), default="USD")
+    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    account_holder_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ProcessingState(Base):
     __tablename__ = "processing_state"
 

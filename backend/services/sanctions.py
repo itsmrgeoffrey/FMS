@@ -141,6 +141,46 @@ def reload() -> int:
     return len(_load())
 
 
+def refresh_from_treasury() -> int:
+    """Download the live OFAC SDN + alias lists, rewrite data/ofac_sdn.json, and
+    reload. Blocking (run in an executor). Returns the new entry count; raises
+    on download failure (caller logs and keeps the current list)."""
+    import csv as _csv
+    import io
+    import json as _json
+    import httpx
+
+    urls = {
+        "sdn": "https://www.treasury.gov/ofac/downloads/sdn.csv",
+        "alt": "https://www.treasury.gov/ofac/downloads/alt.csv",
+    }
+    raw = {}
+    with httpx.Client(follow_redirects=True, timeout=120) as client:
+        for key, url in urls.items():
+            raw[key] = client.get(url).raise_for_status().content.decode("latin-1")
+
+    entries: list[dict] = []
+    program_by_ent: dict[str, str] = {}
+    _EMPTY = {"-0-", ""}
+    for row in _csv.reader(io.StringIO(raw["sdn"])):
+        if len(row) < 4 or row[1].strip() in _EMPTY:
+            continue
+        program_by_ent[row[0]] = row[3].strip()
+        entries.append({"name": row[1].strip(),
+                        "type": row[2].strip() if row[2].strip() not in _EMPTY else "",
+                        "program": row[3].strip() if row[3].strip() not in _EMPTY else "",
+                        "source": "OFAC SDN"})
+    for row in _csv.reader(io.StringIO(raw["alt"])):
+        if len(row) < 4 or row[3].strip() in _EMPTY:
+            continue
+        entries.append({"name": row[3].strip(), "type": "",
+                        "program": program_by_ent.get(row[0], ""), "source": "OFAC SDN (alias)"})
+
+    _FULL_LIST.parent.mkdir(exist_ok=True)
+    _FULL_LIST.write_text(_json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+    return reload()
+
+
 def _similarity(a: str, b: str) -> float:
     """Blend token-overlap (order-independent) with sequence similarity."""
     seq = SequenceMatcher(None, a, b).ratio()

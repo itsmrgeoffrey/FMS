@@ -7,6 +7,33 @@ from backend.config import settings
 log = logging.getLogger(__name__)
 
 
+def send_webhook_alert(case: dict) -> None:
+    """POST flagged cases to a configured webhook (Slack-compatible or generic JSON).
+    Runs in an executor; failures are logged, never raised."""
+    url = (getattr(settings, "alert_webhook_url", "") or "").strip()
+    if not url:
+        return
+    try:
+        import httpx
+        if "hooks.slack.com" in url:
+            flags = "".join(
+                f" [{k}]" for k, v in
+                [("OFAC", case.get("sanctions_hit")), ("SAR", case.get("sar_recommended")),
+                 ("CTR", case.get("ctr_required"))] if v
+            )
+            payload = {"text": (
+                f":rotating_light: *FMS alert* — {case.get('currency')} {case.get('amount'):,.2f} "
+                f"{case.get('direction')} on account {case.get('account_id')} · "
+                f"{case.get('fraud_type') or 'flagged'} ({case.get('confidence')}){flags}"
+            )}
+        else:
+            payload = {"event": "fms.case.flagged", "case": case}
+        httpx.post(url, json=payload, timeout=10)
+        log.info(f"Webhook alert sent for case {case.get('id')}")
+    except Exception as e:
+        log.error(f"Webhook alert failed: {e}")
+
+
 def is_configured() -> bool:
     """True if outbound email (Gmail SMTP) is set up."""
     return bool(settings.gmail_user and settings.gmail_app_password)

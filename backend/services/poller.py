@@ -25,18 +25,16 @@ def get_adapter() -> BaseAdapter:
     global _adapter
     if _adapter is None:
         db_type = bank_config.get("database", {}).get("type", "mysql").lower()
+        kwargs = dict(db_config=bank_config["database"], tables_config=bank_config.get("tables", {}))
         if db_type == "mssql":
-            from backend.adapters.mssql import MSSQLAdapter
-            _adapter = MSSQLAdapter(
-                db_config=bank_config["database"],
-                tables_config=bank_config.get("tables", {}),
-            )
+            from backend.adapters.mssql import MSSQLAdapter as A
+        elif db_type in ("postgres", "postgresql"):
+            from backend.adapters.postgres import PostgresAdapter as A
+        elif db_type == "oracle":
+            from backend.adapters.oracle import OracleAdapter as A
         else:
-            from backend.adapters.mysql import MySQLAdapter
-            _adapter = MySQLAdapter(
-                db_config=bank_config["database"],
-                tables_config=bank_config.get("tables", {}),
-            )
+            from backend.adapters.mysql import MySQLAdapter as A
+        _adapter = A(**kwargs)
     return _adapter
 
 

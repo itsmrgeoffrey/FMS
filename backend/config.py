@@ -29,7 +29,14 @@ class Settings(BaseSettings):
     gmail_user: str = os.getenv("GMAIL_USER", "")
     gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "")
     alert_email: str = os.getenv("ALERT_EMAIL", "")
+    # Optional webhook for flagged-case alerts (Slack incoming-webhook URLs get
+    # Slack-formatted text; anything else receives generic JSON).
+    alert_webhook_url: str = os.getenv("ALERT_WEBHOOK_URL", "")
+    # Hours between automatic OFAC SDN list refreshes (0 disables).
+    ofac_refresh_hours: int = int(os.getenv("FMS_OFAC_REFRESH_HOURS", "24"))
     fms_api_key: str = os.getenv("FMS_API_KEY", "")
+    # Key for the push-ingestion API (falls back to FMS_API_KEY if unset).
+    fms_ingest_api_key: str = os.getenv("FMS_INGEST_API_KEY", "")
     # Secret used to sign login tokens. Generated once and persisted to .env so
     # issued tokens stay valid across restarts.
     auth_secret: str = os.getenv("FMS_AUTH_SECRET", "")

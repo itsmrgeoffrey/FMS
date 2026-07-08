@@ -1,15 +1,51 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, auth } from "@/lib/api";
 import type { RulesConfig } from "@/types";
 
 export default function RulesPage() {
   const [cfg, setCfg] = useState<RulesConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [edit, setEdit] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const isAdmin = auth.user()?.role === "admin";
 
-  useEffect(() => {
-    api.getRules().then(setCfg).catch((e) => setError(String(e)));
-  }, []);
+  function load() {
+    api.getRules().then((c) => {
+      setCfg(c);
+      setEdit({
+        structuring_band_ratio: String(c.detection_parameters.structuring_band_ratio),
+        rolling_window_days: String(c.detection_parameters.rolling_window_days),
+        smurfing_window_hours: String(c.detection_parameters.smurfing_window_hours),
+        sar_ratio: String(c.regulatory_thresholds.sar_ratio_of_ctr),
+        usd_ctr: String(c.regulatory_thresholds.ctr_by_currency["USD"] ?? 10000),
+      });
+    }).catch((e) => setError(String(e)));
+  }
+  useEffect(load, []);
+
+  async function saveRules() {
+    setSaving(true);
+    setNotice(null);
+    try {
+      await api.updateSettings({
+        rules: {
+          structuring_band_ratio: Number(edit.structuring_band_ratio),
+          rolling_window_days: Number(edit.rolling_window_days),
+          smurfing_window_hours: Number(edit.smurfing_window_hours),
+          sar_ratio: Number(edit.sar_ratio),
+          ctr_thresholds: { USD: Number(edit.usd_ctr) },
+        },
+      });
+      setNotice("Saved — applied live to the engine and recorded in the Audit Trail.");
+      load();
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (error) return <div className="p-6 text-sm text-red-600">{error}</div>;
   if (!cfg) return <div className="p-6 flex items-center justify-center h-64 text-gray-400 text-sm">Loading…</div>;
@@ -96,8 +132,41 @@ export default function RulesPage() {
         </section>
       </div>
 
+      {/* Admin tuning */}
+      {isAdmin && (
+        <section className="bg-white rounded-lg border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-700">Tune rules</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Applied live; every change is audited. Document your rationale per MODEL.md.</p>
+            </div>
+            <button onClick={saveRules} disabled={saving}
+              className="px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {([
+              ["usd_ctr", "USD CTR threshold"],
+              ["sar_ratio", "SAR ratio (× CTR)"],
+              ["structuring_band_ratio", "Structuring band ratio"],
+              ["rolling_window_days", "Velocity window (days)"],
+              ["smurfing_window_hours", "Smurfing window (hours)"],
+            ] as const).map(([key, label]) => (
+              <div key={key}>
+                <label className="block text-xs text-gray-500 font-medium mb-1">{label}</label>
+                <input type="number" step="any" value={edit[key] ?? ""}
+                  onChange={(e) => setEdit((p) => ({ ...p, [key]: e.target.value }))}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            ))}
+          </div>
+          {notice && <p className="text-sm mt-3 text-green-700">{notice}</p>}
+        </section>
+      )}
+
       <p className="text-xs text-gray-400">
-        These values are defined in the engine and documented in MODEL.md. Editing thresholds from the UI is a planned enhancement — for now they are shown read-only.
+        Parameters are documented with their rationale in MODEL.md. {isAdmin ? "Changes above apply immediately and are recorded in the Audit Trail." : "Ask an administrator to tune thresholds."}
       </p>
     </div>
   );

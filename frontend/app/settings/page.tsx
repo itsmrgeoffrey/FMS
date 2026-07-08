@@ -463,6 +463,8 @@ export default function SettingsPage() {
             >
               <option value="mysql">MySQL</option>
               <option value="mssql">SQL Server (MSSQL)</option>
+              <option value="postgres">PostgreSQL</option>
+              <option value="oracle">Oracle</option>
             </select>
           </div>
           <Field label="Host" value={db.host} onChange={(v) => set(["database", "host"], v)} placeholder=". or hostname" />
