@@ -38,11 +38,14 @@ class MSSQLAdapter(BaseAdapter):
         host = cfg["host"]
         # Use named pipe for local "." connections, TCP for remote
         server = host if host == "." else f"{host},{cfg.get('port', 1433)}"
+        encrypt = "yes" if cfg.get("encrypt") else "no"
+        trust = "yes" if cfg.get("trust_server_certificate", True) else "no"
         base = (
             f"DRIVER={{ODBC Driver 17 for SQL Server}};"
             f"SERVER={server};"
             f"DATABASE={cfg['database']};"
-            f"TrustServerCertificate=yes;"
+            f"Encrypt={encrypt};"
+            f"TrustServerCertificate={trust};"
         )
         if cfg.get("trusted_connection"):
             return base + "Trusted_Connection=yes;"

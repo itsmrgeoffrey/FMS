@@ -9,6 +9,9 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 ROOT = Path(__file__).parent.parent
 
+APP_VERSION = "0.1.0"
+ENVIRONMENT = os.getenv("FMS_ENV", "development")
+
 
 class Settings(BaseSettings):
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")

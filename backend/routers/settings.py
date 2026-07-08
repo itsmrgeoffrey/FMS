@@ -14,15 +14,17 @@ Secrets (passwords, API keys) are never returned — GET reports only whether
 each is set. On save, empty secret fields mean "keep the current value".
 """
 import logging
+from datetime import datetime
 
 import yaml
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from backend.auth import require_admin
-from backend.config import ROOT, bank_config, settings
+from backend.config import APP_VERSION, ENVIRONMENT, ROOT, bank_config, settings
 from backend.models import User
 from backend.routers import audit
+from backend.services import poller
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +48,8 @@ class DatabaseSettings(BaseModel):
     password: str | None = None          # empty = unchanged
     database: str | None = None
     trusted_connection: bool | None = None
+    encrypt: bool | None = None                  # TLS
+    trust_server_certificate: bool | None = None
 
 
 class MonitoringSettings(BaseModel):
@@ -136,6 +140,8 @@ async def get_settings():
             "password_set": bool(db.get("password")),
             "database": db.get("database", ""),
             "trusted_connection": bool(db.get("trusted_connection", False)),
+            "encrypt": bool(db.get("encrypt", False)),
+            "trust_server_certificate": bool(db.get("trust_server_certificate", True)),
         },
         "tables": bank_config.get("tables", {}),
         "mappable_fields": MAPPABLE_FIELDS,
@@ -169,19 +175,59 @@ async def get_settings():
     }
 
 
+@router.post("/test-connection")
+async def test_connection(user: User = Depends(require_admin)):
+    """Attempt a connection to the configured bank database and report status."""
+    try:
+        adapter = poller.get_adapter()
+        connected = await adapter.is_connected()
+        if not connected:
+            await adapter.connect()
+            connected = await adapter.is_connected()
+        if connected:
+            return {"connected": True, "message": "Connection successful.",
+                    "db_type": bank_config.get("database", {}).get("type", "")}
+        return {"connected": False, "message": "Could not establish a connection."}
+    except Exception as e:
+        return {"connected": False, "message": f"Connection failed: {e}"}
+
+
+@router.get("/system-info")
+async def system_info(user: User = Depends(require_admin)):
+    return {
+        "app_version": APP_VERSION,
+        "environment": ENVIRONMENT,
+        "database_connected": poller.is_running(),
+        "database_type": bank_config.get("database", {}).get("type", ""),
+        "read_only": True,   # FMS only ever reads from the bank database
+        "audit_logging": True,
+        "encryption": {
+            "auth_tokens_signed": True,
+            "db_tls": bool(bank_config.get("database", {}).get("encrypt", False)),
+        },
+        "server_time": datetime.utcnow().isoformat() + "Z",
+        "last_poll_at": poller.last_poll_at().isoformat() + "Z" if poller.last_poll_at() else None,
+    }
+
+
 @router.put("")
 async def update_settings(body: SettingsUpdate, request: Request, user: User = Depends(require_admin)):
     restart_required = False
     data = _read_yaml()
 
+    db_changes: list[str] = []
     if body.database is not None:
         db = data.setdefault("database", {})
-        for field in ("type", "host", "port", "user", "database", "trusted_connection"):
+        # Track old->new for non-secret fields for the activity log.
+        for field in ("type", "host", "port", "user", "database", "trusted_connection",
+                      "encrypt", "trust_server_certificate"):
             value = getattr(body.database, field)
-            if value is not None:
+            if value is not None and db.get(field) != value:
+                db_changes.append(f"{field}: {db.get(field)!r} → {value!r}")
                 db[field] = value
         if body.database.password:  # empty = keep existing
             db["password"] = body.database.password
+            db_changes.append("password: (changed)")
         restart_required = True
 
     if body.tables is not None:
@@ -249,9 +295,9 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
 
     sections = [k for k in ("database", "tables", "monitoring", "institution", "alerts", "llm", "security")
                 if getattr(body, k) is not None]
-    await audit.record(
-        user.username, "SETTINGS_UPDATED",
-        detail=", ".join(sections) or None, request=request,
-    )
+    detail = ", ".join(sections) or None
+    if db_changes:
+        detail = f"{detail} [{'; '.join(db_changes)}]"
+    await audit.record(user.username, "SETTINGS_UPDATED", detail=detail, request=request)
     log.info(f"Settings updated by {user.username} (restart_required={restart_required})")
     return {"saved": True, "restart_required": restart_required}
