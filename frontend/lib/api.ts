@@ -100,6 +100,14 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  testConnection: (): Promise<{ connected: boolean; message: string; db_type?: string }> =>
+    req("/settings/test-connection", { method: "POST" }),
+
+  getSystemInfo: (): Promise<Record<string, any>> => req("/settings/system-info"),  // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  getHealth: (): Promise<{ status: string; bank_db_connected: boolean; poller_running: boolean; last_poll_at: string | null; last_error: string | null }> =>
+    req("/health"),
+
   // Regulatory filing exports (CSV download links).
   ctrReportUrl: (params?: Record<string, string | undefined>) => reportUrl("ctr", params),
   sarReportUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params),

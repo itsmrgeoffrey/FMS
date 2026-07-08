@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, auth } from "@/lib/api";
-import type { AuthUser } from "@/types";
+import type { AuthUser, AuditEntry } from "@/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -284,11 +284,36 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tab, setTab] = useState<AdminTab>("system");
+  const [sysInfo, setSysInfo] = useState<Record<string, any> | null>(null);
+  const [health, setHealth] = useState<{ bank_db_connected: boolean; last_poll_at: string | null } | null>(null);
+  const [testResult, setTestResult] = useState<{ connected: boolean; message: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [activity, setActivity] = useState<AuditEntry[]>([]);
+  const pristine = useRef<string>("");
   const isAdmin = auth.user()?.role === "admin";
 
   useEffect(() => {
-    if (isAdmin) api.getSettings().then(setData).catch((e) => setError(String(e)));
+    if (!isAdmin) return;
+    api.getSettings().then((d) => { setData(d); pristine.current = JSON.stringify(d); }).catch((e) => setError(String(e)));
+    api.getSystemInfo().then(setSysInfo).catch(() => {});
+    api.getHealth().then(setHealth).catch(() => {});
+    api.getAudit(50).then((a) => setActivity(a.filter((e) => e.action === "SETTINGS_UPDATED"))).catch(() => {});
   }, [isAdmin]);
+
+  const dirty = !!data && !!pristine.current && JSON.stringify(data) !== pristine.current;
+
+  async function testConnection() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await api.testConnection();
+      setTestResult(r);
+    } catch (e) {
+      setTestResult({ connected: false, message: String(e) });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   async function save(section: string, payload: Record<string, unknown>) {
     setSaving(section);
@@ -301,8 +326,11 @@ export default function SettingsPage() {
           ? "Saved. Restart the backend to apply database/table changes."
           : "Saved — changes applied."
       );
+      setData((d: any) => { pristine.current = JSON.stringify(d); return d; });
+      api.getAudit(50).then((a) => setActivity(a.filter((e) => e.action === "SETTINGS_UPDATED"))).catch(() => {});
     } catch (e) {
-      setError(String(e));
+      const msg = String(e).replace(/^Error:\s*API error \d+:\s*/, "");
+      setError(msg.includes("401") || /invalid/i.test(msg) ? "Invalid credentials or unauthorized." : msg);
     } finally {
       setSaving(null);
     }
@@ -358,13 +386,22 @@ export default function SettingsPage() {
         {TABS.filter((t) => !t.adminOnly || isAdmin).map((t) => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key); setNotice(null); setError(null); }}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.key ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"
+            onClick={() => { if (!t.planned) { setTab(t.key); setNotice(null); setError(null); } }}
+            disabled={t.planned}
+            title={t.planned ? "Coming soon" : undefined}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors inline-flex items-center gap-1 ${
+              t.planned
+                ? "border-transparent text-gray-300 cursor-not-allowed"
+                : tab === t.key ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
+            {t.planned && (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            )}
             {t.label}
-            {t.planned && <span className="ml-1 text-[10px] text-gray-400">soon</span>}
+            {t.planned && <span className="ml-1 text-[10px] uppercase tracking-wide text-gray-300">Coming soon</span>}
           </button>
         ))}
       </div>
@@ -375,13 +412,18 @@ export default function SettingsPage() {
       {error && (
         <div className="text-sm px-4 py-3 rounded-lg bg-red-50 text-red-700 border border-red-200">{error}</div>
       )}
+      {dirty && (
+        <div className="text-sm px-4 py-2 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-400" /> You have unsaved changes — remember to Save.
+        </div>
+      )}
 
       {tab === "system" && (<>
       {/* Bank database */}
       <Section
         title="Bank Database"
         subtitle="Read-only connection to your core/transaction database"
-        badge="restart required"
+        badge="Pending Restart"
         saving={saving === "database"}
         onSave={() =>
           save("database", {
@@ -393,10 +435,24 @@ export default function SettingsPage() {
               password: db.password || "",
               database: db.database,
               trusted_connection: db.trusted_connection,
+              encrypt: db.encrypt,
+              trust_server_certificate: db.trust_server_certificate,
             },
           })
         }
       >
+        {/* Connection status */}
+        <div className="flex flex-wrap items-center gap-4 mb-4 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+          <span className="inline-flex items-center gap-2 text-sm">
+            <span className={`w-2.5 h-2.5 rounded-full ${health?.bank_db_connected ? "bg-green-500" : "bg-red-500"}`} />
+            <span className="font-medium text-gray-700">{health?.bank_db_connected ? "Connected" : "Disconnected"}</span>
+          </span>
+          <span className="text-xs text-gray-400">
+            Last checked: {health?.last_poll_at ? new Date(health.last_poll_at).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "—"}
+          </span>
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">Read-only</span>
+        </div>
+
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-xs text-gray-500 font-medium mb-1">Type</label>
@@ -414,13 +470,15 @@ export default function SettingsPage() {
           <Field label="Database" value={db.database} onChange={(v) => set(["database", "database"], v)} />
           <Field label="User" value={db.user} onChange={(v) => set(["database", "user"], v)} hint="Use a read-only DB user" />
           <Field
-            label={`Password ${db.password_set ? "(set)" : "(not set)"}`}
+            label="Password"
             value={db.password ?? ""}
             type="password"
-            placeholder="Leave blank to keep current"
+            placeholder={db.password_set ? "•••••••• — stored securely" : "Not set"}
             onChange={(v) => set(["database", "password"], v)}
+            hint={db.password_set ? "Stored securely. Leave blank to keep current, or type to change." : "Leave blank if using Windows Authentication."}
           />
         </div>
+
         <label className="flex items-center gap-2 mt-4 text-sm text-gray-700">
           <input
             type="checkbox"
@@ -430,13 +488,58 @@ export default function SettingsPage() {
           />
           Windows Authentication (trusted connection — MSSQL only)
         </label>
+
+        {/* Secure connection options */}
+        <div className="mt-5 pt-4 border-t border-gray-100">
+          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Secure connection</p>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={!!db.encrypt} onChange={(e) => set(["database", "encrypt"], e.target.checked)} className="rounded border-gray-300" />
+              Encrypt connection (TLS)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={!!db.trust_server_certificate} onChange={(e) => set(["database", "trust_server_certificate"], e.target.checked)} className="rounded border-gray-300" />
+              Trust server certificate
+            </label>
+            <button type="button" disabled title="Coming soon"
+              className="mt-1 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-300 cursor-not-allowed inline-flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+              Upload SSL Certificate (coming soon)
+            </button>
+          </div>
+        </div>
+
+        {/* Read-only user banner */}
+        <div className="mt-4 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800">
+          <span className="font-semibold">Use a read-only database user.</span> FMS never writes to your banking
+          database — it only reads transactions. A least-privilege (read-only) account limits exposure if credentials
+          are ever compromised.
+        </div>
+
+        {/* Test connection */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={testConnection}
+            disabled={testing}
+            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {testing ? "Testing…" : "Test Connection"}
+          </button>
+          {testResult && (
+            <span className={`text-sm ${testResult.connected ? "text-green-600" : "text-red-600"}`}>
+              {testResult.connected ? "✓ " : "✗ "}{testResult.message}
+            </span>
+          )}
+          <span className="text-xs text-gray-400">Tests the currently saved connection.</span>
+        </div>
       </Section>
 
       {/* Table mappings */}
       <Section
         title="Table Mappings"
         subtitle="Map your table columns onto the fields FMS understands"
-        badge="restart required"
+        badge="Pending Restart"
         saving={saving === "tables"}
         onSave={() => save("tables", { tables })}
       >
@@ -613,6 +716,65 @@ export default function SettingsPage() {
           />
         </div>
       </Section>
+
+      {/* System information */}
+      <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-sm font-semibold text-gray-700 mb-4">System Information</h2>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+          <div><p className="text-xs text-gray-400">Application version</p><p className="text-gray-800 font-medium">{sysInfo?.app_version ?? "—"}</p></div>
+          <div><p className="text-xs text-gray-400">Environment</p><p className="text-gray-800 font-medium capitalize">{sysInfo?.environment ?? "—"}</p></div>
+          <div>
+            <p className="text-xs text-gray-400">Database status</p>
+            <p className="font-medium inline-flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${sysInfo?.database_connected ? "bg-green-500" : "bg-red-500"}`} />
+              <span className="text-gray-800">{sysInfo?.database_connected ? "Connected" : "Disconnected"}</span>
+            </p>
+          </div>
+          <div><p className="text-xs text-gray-400">Audit logging</p><p className="text-gray-800 font-medium">{sysInfo?.audit_logging ? "Enabled" : "Disabled"}</p></div>
+          <div><p className="text-xs text-gray-400">Encryption</p><p className="text-gray-800 font-medium">Tokens signed{sysInfo?.encryption?.db_tls ? " · DB TLS on" : " · DB TLS off"}</p></div>
+          <div><p className="text-xs text-gray-400">Server time (UTC)</p><p className="text-gray-800 font-medium">{sysInfo?.server_time ? new Date(sysInfo.server_time).toLocaleString("en-GB") : "—"}</p></div>
+        </div>
+      </section>
+
+      {/* Security best practices */}
+      <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-sm font-semibold text-gray-700 mb-3">Security</h2>
+        <ul className="space-y-1.5 text-sm text-gray-600">
+          {[
+            "User passwords are stored hashed (PBKDF2), never in plain text",
+            "The bank database is accessed read-only — FMS never writes to it",
+            "Database passwords are never displayed, only stored",
+            "Every configuration change is recorded in the Audit Trail",
+            "System changes require administrator privileges",
+          ].map((t) => (
+            <li key={t} className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-green-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              {t}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Configuration activity log */}
+      <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-sm font-semibold text-gray-700 mb-1">Recent configuration changes</h2>
+        <p className="text-xs text-gray-400 mb-4">Who changed what, and when — from the Audit Trail.</p>
+        {activity.length === 0 ? (
+          <p className="text-sm text-gray-400">No configuration changes recorded yet.</p>
+        ) : (
+          <ol className="space-y-3">
+            {activity.slice(0, 10).map((a) => (
+              <li key={a.id} className="text-sm border-b border-gray-50 pb-2 last:border-0">
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-800">{a.username}</span>
+                  <span className="text-xs text-gray-400">{new Date(a.created_at + "Z").toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}</span>
+                </div>
+                {a.detail && <p className="text-xs text-gray-500 mt-0.5 font-mono break-words">{a.detail}</p>}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
       </>)}
 
       {tab === "account" && <MyAccountSection />}
