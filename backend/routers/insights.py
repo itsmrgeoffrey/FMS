@@ -1,4 +1,6 @@
-"""Read-only aggregate endpoints powering the Customers and Rule Engine pages."""
+"""Read-only aggregate endpoints powering the Customers, Rule Engine and Analytics pages."""
+from datetime import datetime, date
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,6 +58,56 @@ async def customers(
             }
             for r in rows
         ],
+    }
+
+
+@router.get("/analytics")
+async def analytics(db: AsyncSession = Depends(get_db), _user: User = Depends(require_user)):
+    """KPIs for the Analytics page — all computed from real case data."""
+    today_start = datetime.combine(date.today(), datetime.min.time())
+
+    async def count(*filters):
+        stmt = select(func.count()).select_from(FraudCase)
+        if filters:
+            stmt = stmt.where(and_(*filters))
+        return (await db.execute(stmt)).scalar_one()
+
+    total = await count()
+    flagged = await count(FraudCase.status != "CLEAN")
+    open_cases = await count(FraudCase.status.in_(OPEN_STATUSES))
+    alerts_today = await count(FraudCase.created_at >= today_start, FraudCase.status != "CLEAN")
+    confirmed = await count(FraudCase.status == "CONFIRMED_FRAUD")
+    dismissed = await count(FraudCase.status == "DISMISSED")
+    resolved = confirmed + dismissed
+
+    # Value flagged for review, per currency (mixed-currency safe).
+    q = await db.execute(
+        select(FraudCase.currency, func.sum(FraudCase.amount))
+        .where(FraudCase.status != "CLEAN")
+        .group_by(FraudCase.currency)
+        .order_by(func.sum(FraudCase.amount).desc())
+    )
+    value_flagged = [{"currency": cur, "amount": round(float(total_amt or 0), 2)} for cur, total_amt in q.all()]
+
+    # Top fraud types (flagged cases only).
+    q = await db.execute(
+        select(FraudCase.fraud_type, func.count())
+        .where(FraudCase.fraud_type.isnot(None))
+        .group_by(FraudCase.fraud_type)
+        .order_by(func.count().desc())
+    )
+    top_fraud_types = [{"type": t, "count": c} for t, c in q.all()]
+
+    return {
+        "transactions_processed": total,
+        "alerts_today": alerts_today,
+        "open_cases": open_cases,
+        "value_flagged": value_flagged,          # "Fraud Loss Prevented" — value surfaced for review
+        "resolved": {"confirmed": confirmed, "dismissed": dismissed, "total": resolved},
+        # False positive rate among REVIEWED (resolved) alerts; null until any are resolved.
+        "false_positive_rate": (dismissed / resolved) if resolved else None,
+        "top_fraud_types": top_fraud_types,
+        "flagged_total": flagged,
     }
 
 

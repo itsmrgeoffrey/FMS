@@ -1,4 +1,4 @@
-import type { CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig } from "@/types";
+import type { CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig, AnalyticsKpis } from "@/types";
 
 const BASE = "/api";
 // Optional — only needed if the backend has FMS_API_KEY set (machine auth).
@@ -90,6 +90,8 @@ export const api = {
     req(`/customers?limit=${limit}`),
 
   getRules: (): Promise<RulesConfig> => req<RulesConfig>("/rules"),
+
+  getAnalyticsKpis: (): Promise<AnalyticsKpis> => req<AnalyticsKpis>("/analytics"),
 
   getSettings: (): Promise<Record<string, unknown>> => req("/settings"),
 

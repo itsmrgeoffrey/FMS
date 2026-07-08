@@ -115,6 +115,17 @@ export interface Dashboard {
   }[];
 }
 
+export interface AnalyticsKpis {
+  transactions_processed: number;
+  alerts_today: number;
+  open_cases: number;
+  value_flagged: { currency: string; amount: number }[];
+  resolved: { confirmed: number; dismissed: number; total: number };
+  false_positive_rate: number | null;
+  top_fraud_types: { type: string; count: number }[];
+  flagged_total: number;
+}
+
 export interface Customer {
   account_id: string;
   transactions: number;

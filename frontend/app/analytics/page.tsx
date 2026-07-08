@@ -1,17 +1,36 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { Dashboard } from "@/types";
+import type { Dashboard, AnalyticsKpis } from "@/types";
 
 const RISK_COLORS: Record<string, string> = {
   LOW: "bg-green-400", MEDIUM: "bg-amber-400", HIGH: "bg-orange-500", CRITICAL: "bg-red-500",
 };
 
+function money(a: number, c: string) {
+  const s = c === "USD" ? "$" : c === "NGN" ? "₦" : c + " ";
+  return `${s}${a.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
 export default function AnalyticsPage() {
   const [d, setD] = useState<Dashboard | null>(null);
+  const [k, setK] = useState<AnalyticsKpis | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { api.getDashboard().then(setD).catch((e) => setError(String(e))); }, []);
+  useEffect(() => {
+    api.getDashboard().then(setD).catch((e) => setError(String(e)));
+    api.getAnalyticsKpis().then(setK).catch(() => {});
+  }, []);
 
   if (error) return <div className="p-6 text-sm text-red-600">{error}</div>;
   if (!d) return <div className="p-6 flex items-center justify-center h-64 text-gray-400 text-sm">Loading…</div>;
@@ -24,8 +43,27 @@ export default function AnalyticsPage() {
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
-        <p className="text-sm text-gray-500 mt-1">Breakdowns across all analyzed activity.</p>
+        <p className="text-sm text-gray-500 mt-1">Key indicators and breakdowns across all analyzed activity.</p>
       </div>
+
+      {/* KPIs */}
+      {k && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <Kpi
+            label="Fraud Loss Prevented"
+            value={k.value_flagged.length ? money(k.value_flagged[0].amount, k.value_flagged[0].currency) : "$0"}
+            sub="value of flagged transactions"
+          />
+          <Kpi label="Transactions Processed" value={k.transactions_processed.toLocaleString()} sub={`${k.flagged_total} flagged`} />
+          <Kpi label="Alerts Today" value={String(k.alerts_today)} />
+          <Kpi label="Open Cases" value={String(k.open_cases)} />
+          <Kpi
+            label="False Positive Rate"
+            value={k.false_positive_rate === null ? "—" : `${Math.round(k.false_positive_rate * 100)}%`}
+            sub={k.resolved.total === 0 ? "no reviewed alerts yet" : `${k.resolved.dismissed}/${k.resolved.total} reviewed dismissed`}
+          />
+        </div>
+      )}
 
       {/* Filing obligations */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
