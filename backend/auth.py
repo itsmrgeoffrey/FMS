@@ -108,10 +108,33 @@ async def require_user(
     return user
 
 
+# ─── Role-based access control ───────────────────────────────────────────────
+# admin   — full access, including Administration (config + user management)
+# analyst — view everything + act on cases (dismiss/confirm/escalate/note)
+# viewer  — read-only: can view, cannot take actions or configure
+ROLE_CAPABILITIES: dict[str, set[str]] = {
+    "admin": {"view", "act", "admin"},
+    "analyst": {"view", "act"},
+    "viewer": {"view"},
+}
+VALID_ROLES = set(ROLE_CAPABILITIES)
+
+
+def role_has(role: str, capability: str) -> bool:
+    return capability in ROLE_CAPABILITIES.get(role, set())
+
+
 async def require_admin(user: User = Depends(require_user)) -> User:
-    """Require a logged-in user with the admin role."""
-    if user.role != "admin":
+    """Require the 'admin' capability (Administration)."""
+    if not role_has(user.role, "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
+async def require_case_action(user: User = Depends(require_user)) -> User:
+    """Require the 'act' capability — admins and analysts, not viewers."""
+    if not role_has(user.role, "act"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your role has read-only access")
     return user
 
 

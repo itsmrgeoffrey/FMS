@@ -19,14 +19,14 @@ import yaml
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from backend.auth import require_user
+from backend.auth import require_admin
 from backend.config import ROOT, bank_config, settings
 from backend.models import User
 from backend.routers import audit
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_user)])
+router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_admin)])
 
 _YAML_PATH = ROOT / "bank_config.yaml"
 _ENV_PATH = ROOT / ".env"
@@ -170,7 +170,7 @@ async def get_settings():
 
 
 @router.put("")
-async def update_settings(body: SettingsUpdate, request: Request, user: User = Depends(require_user)):
+async def update_settings(body: SettingsUpdate, request: Request, user: User = Depends(require_admin)):
     restart_required = False
     data = _read_yaml()
 

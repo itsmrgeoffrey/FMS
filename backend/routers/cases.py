@@ -4,7 +4,7 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import require_user
+from backend.auth import require_user, require_case_action
 from backend.database import get_db
 from backend.models import FraudCase, CaseAction, User
 from backend.routers import audit
@@ -83,7 +83,7 @@ async def add_action(
     body: CaseActionCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_case_action),
 ):
     result = await db.execute(
         select(FraudCase)

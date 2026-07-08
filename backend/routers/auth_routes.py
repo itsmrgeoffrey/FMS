@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import create_token, hash_password, require_admin, require_user, verify_password
+from backend.auth import VALID_ROLES, create_token, hash_password, require_admin, require_user, verify_password
 from backend.database import get_db
 from backend.models import User
 from backend.routers import audit
@@ -179,6 +179,32 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Asy
         # Log the attempt without confirming existence to the caller.
         log.info(f"Forgot-password request for email={email!r} (delivered={bool(user and emailer.is_configured())})")
     return generic
+
+
+class RoleUpdate(BaseModel):
+    role: str
+
+
+@router.post("/users/{user_id}/role")
+async def set_role(
+    user_id: str,
+    body: RoleUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    role = body.role.strip().lower()
+    if role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(sorted(VALID_ROLES))}")
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == admin.id and role != "admin":
+        raise HTTPException(status_code=400, detail="You cannot remove your own admin role")
+    target.role = role
+    await db.commit()
+    await audit.record(admin.username, "USER_ROLE_CHANGED", target=target.username, detail=role, request=request)
+    return {"username": target.username, "role": target.role}
 
 
 @router.post("/users/{user_id}/toggle-active")
