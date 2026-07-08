@@ -1,6 +1,8 @@
 """Signup / login / current-user / password + user management endpoints."""
 import logging
 import secrets
+import time
+from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -26,6 +28,19 @@ MIN_PASSWORD_LEN = 8
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+# Simple in-memory login throttle (per client IP). Single-node; for multi-node
+# deployments move this to a shared store (e.g. Redis).
+_LOGIN_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
+_MAX_ATTEMPTS = 10
+_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _rate_limited(key: str) -> bool:
+    now = time.time()
+    _LOGIN_ATTEMPTS[key] = [t for t in _LOGIN_ATTEMPTS[key] if now - t < _WINDOW_SECONDS]
+    return len(_LOGIN_ATTEMPTS[key]) >= _MAX_ATTEMPTS
 
 
 def _normalize_email(email: str) -> str:
@@ -71,16 +86,24 @@ async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depen
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    from backend.auth import client_ip
+    ip = client_ip(request) or "unknown"
+    if _rate_limited(ip):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again in a few minutes.")
+
     email = _normalize_email(body.email)
     # Match on email, falling back to username so pre-email accounts can still sign in.
     user = (await db.execute(
         select(User).where((User.email == email) | (User.username == email))
     )).scalar_one_or_none()
     if not user or not verify_password(body.password, user.password_hash):
+        _LOGIN_ATTEMPTS[ip].append(time.time())
         # Failed login — logged for security monitoring (identifier only, never the password).
         log.warning(f"Failed login attempt for email={email!r}")
         await audit.record(email, "LOGIN_FAILED", request=request)
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    _LOGIN_ATTEMPTS.pop(ip, None)  # clear on success
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
 
