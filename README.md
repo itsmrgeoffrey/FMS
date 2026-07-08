@@ -100,6 +100,10 @@ FMS handles sensitive financial data. Use a **read-only** database user, set `FM
 
 Contributions welcome — new database adapters, additional detection signals, and jurisdiction thresholds especially. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## User manual
+
+A full operator's manual — sign-in, roles, working cases, reports, administration, and troubleshooting — is in [docs/USER_MANUAL.md](docs/USER_MANUAL.md).
+
 ## Methodology
 
 Every threshold, scoring rule, and screening parameter is documented — with its regulatory basis and testing evidence — in [MODEL.md](MODEL.md), written to support FFIEC/SR 11-7-style model documentation expectations.
