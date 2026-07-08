@@ -148,12 +148,26 @@ function UsersSection() {
     }
   }
 
+  async function changeRole(u: AuthUser, role: string) {
+    try {
+      await api.setUserRole(u.id, role);
+      load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   return (
     <section className="bg-white rounded-lg border border-gray-200 p-5">
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-gray-700">Users</h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Password recovery: reset a user&apos;s password here. If email is configured it&apos;s sent to them; otherwise it&apos;s shown once below to hand over securely.
+          Assign roles, reset passwords, and enable/disable accounts.
+        </p>
+        <p className="text-xs text-gray-400 mt-1">
+          <span className="font-medium text-gray-500">Admin</span> — full access ·{" "}
+          <span className="font-medium text-gray-500">Analyst</span> — view + act on cases ·{" "}
+          <span className="font-medium text-gray-500">Viewer</span> — read-only
         </p>
       </div>
 
@@ -193,7 +207,21 @@ function UsersSection() {
                 <span className="font-medium text-gray-800">{u.username}</span>
                 {u.full_name && <span className="text-gray-400 ml-2 text-xs">{u.full_name}</span>}
               </td>
-              <td className="py-2.5 pr-4 capitalize text-gray-600">{u.role}</td>
+              <td className="py-2.5 pr-4">
+                {u.id === me?.id ? (
+                  <span className="capitalize text-gray-600">{u.role}</span>
+                ) : (
+                  <select
+                    value={u.role}
+                    onChange={(e) => changeRole(u, e.target.value)}
+                    className="text-sm border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 capitalize"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="analyst">Analyst</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                )}
+              </td>
               <td className="py-2.5 pr-4">
                 <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${u.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
                   {u.is_active ? "active" : "disabled"}
@@ -259,8 +287,8 @@ export default function SettingsPage() {
   const isAdmin = auth.user()?.role === "admin";
 
   useEffect(() => {
-    api.getSettings().then(setData).catch((e) => setError(String(e)));
-  }, []);
+    if (isAdmin) api.getSettings().then(setData).catch((e) => setError(String(e)));
+  }, [isAdmin]);
 
   async function save(section: string, payload: Record<string, unknown>) {
     setSaving(section);
@@ -289,6 +317,19 @@ export default function SettingsPage() {
       return next;
     });
   };
+
+  // Non-admins have no Administration access — just their own account.
+  if (!isAdmin) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">My Account</h1>
+          <p className="text-sm text-gray-500 mt-1">Manage your password.</p>
+        </div>
+        <MyAccountSection />
+      </div>
+    );
+  }
 
   if (error && !data) {
     return <div className="p-6 text-sm text-red-600">{error}</div>;

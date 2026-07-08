@@ -70,7 +70,7 @@ export interface AuthUser {
   username: string;
   email: string | null;
   full_name: string | null;
-  role: "admin" | "analyst";
+  role: "admin" | "analyst" | "viewer";
   is_active: boolean;
   created_at: string;
   last_login_at: string | null;

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, auth } from "@/lib/api";
 import type { FraudCase } from "@/types";
 
 const ACTOR_KEY = "fms.actor";
@@ -61,6 +61,14 @@ export function ActionPanel({
     return (
       <p className="text-sm text-gray-500 italic">
         This case is closed ({caseData.status.replace("_", " ")}).
+      </p>
+    );
+  }
+
+  if (auth.user()?.role === "viewer") {
+    return (
+      <p className="text-sm text-gray-500 italic">
+        You have read-only (viewer) access — case actions are disabled for your role.
       </p>
     );
   }

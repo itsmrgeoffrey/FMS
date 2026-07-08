@@ -141,4 +141,10 @@ export const api = {
     req(`/auth/users/${userId}/reset-password`, { method: "POST" }),
   toggleUserActive: (userId: string): Promise<{ username: string; is_active: boolean }> =>
     req(`/auth/users/${userId}/toggle-active`, { method: "POST" }),
+  setUserRole: (userId: string, role: string): Promise<{ username: string; role: string }> =>
+    req(`/auth/users/${userId}/role`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    }),
 };
