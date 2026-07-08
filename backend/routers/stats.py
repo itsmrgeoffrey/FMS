@@ -1,6 +1,6 @@
 from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth import require_user
@@ -72,16 +72,19 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
 
     # Daily activity, last N days (flagged vs clean), zero-filled.
     cutoff = datetime.combine(date.today() - timedelta(days=ACTIVITY_DAYS - 1), datetime.min.time())
+    # cast-to-Date is portable (SQL Server + SQLite); normalize the key to an
+    # ISO date string since drivers return either a date object or a string.
+    day = cast(FraudCase.created_at, Date)
     q = await db.execute(
         select(
-            func.date(FraudCase.created_at),
+            day,
             func.sum(func.iif(FraudCase.status != "CLEAN", 1, 0)),
             func.sum(func.iif(FraudCase.status == "CLEAN", 1, 0)),
         )
         .where(FraudCase.created_at >= cutoff)
-        .group_by(func.date(FraudCase.created_at))
+        .group_by(day)
     )
-    by_day = {row[0]: {"flagged": int(row[1] or 0), "clean": int(row[2] or 0)} for row in q.all()}
+    by_day = {str(row[0])[:10]: {"flagged": int(row[1] or 0), "clean": int(row[2] or 0)} for row in q.all()}
     activity = []
     for i in range(ACTIVITY_DAYS):
         d = (date.today() - timedelta(days=ACTIVITY_DAYS - 1 - i)).isoformat()
@@ -97,18 +100,16 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     )
     fraud_types = [{"type": t, "count": c} for t, c in q.all()]
 
-    # Risk-level distribution across all analyzed cases.
-    def level_expr():
-        return func.iif(FraudCase.risk_score <= 30, "LOW",
-               func.iif(FraudCase.risk_score <= 55, "MEDIUM",
-               func.iif(FraudCase.risk_score <= 75, "HIGH", "CRITICAL")))
-    q = await db.execute(
-        select(level_expr(), func.count())
-        .where(FraudCase.risk_score.isnot(None))
-        .group_by(level_expr())
-    )
-    risk_rows = dict(q.all())
-    risk_levels = [{"level": lv, "count": int(risk_rows.get(lv, 0))} for lv in ("LOW", "MEDIUM", "HIGH", "CRITICAL")]
+    # Risk-level distribution — counted per band (portable; avoids GROUP BY on a
+    # computed CASE/IIF expression, which SQL Server rejects).
+    low = await count(FraudCase.risk_score.isnot(None), FraudCase.risk_score <= 30)
+    medium = await count(FraudCase.risk_score > 30, FraudCase.risk_score <= 55)
+    high = await count(FraudCase.risk_score > 55, FraudCase.risk_score <= 75)
+    critical = await count(FraudCase.risk_score > 75)
+    risk_levels = [
+        {"level": "LOW", "count": low}, {"level": "MEDIUM", "count": medium},
+        {"level": "HIGH", "count": high}, {"level": "CRITICAL", "count": critical},
+    ]
 
     # Amount currently under investigation, per currency.
     q = await db.execute(

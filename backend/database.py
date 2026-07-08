@@ -1,15 +1,22 @@
 import logging
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
 log = logging.getLogger(__name__)
 
-# FMS_DB_PATH lets containerized deployments keep the case store on a volume.
+# Load .env before reading the DB URL, independent of import order.
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+# The FMS application store. Defaults to SQLite (portable, used by tests); set
+# FMS_APP_DB_URL to a server database URL (e.g. SQL Server via mssql+aioodbc,
+# or Postgres via postgresql+asyncpg) for a multi-user deployment.
+# FMS_DB_PATH still lets a SQLite deployment keep the file on a volume.
 DB_PATH = Path(os.getenv("FMS_DB_PATH", "") or Path(__file__).parent.parent / "fms.db")
-DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
+DATABASE_URL = os.getenv("FMS_APP_DB_URL", "").strip() or f"sqlite+aiosqlite:///{DB_PATH}"
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -36,6 +43,11 @@ _ADDED_COLUMNS = {
 
 
 async def _run_migrations(conn) -> None:
+    # These are SQLite-specific retrofits (PRAGMA/ADD COLUMN) for evolving an
+    # existing SQLite file. On a server database, create_all() builds every
+    # table with all current columns, so nothing to retrofit.
+    if conn.dialect.name != "sqlite":
+        return
     for table, columns in _ADDED_COLUMNS.items():
         existing = {
             row[1]
