@@ -96,20 +96,21 @@ export default function DemoPage() {
     try {
       const reference = `TRF/${Date.now()}`;
       setLastReference(reference);
+      // Push through the ingestion engine (same path a real institution's API
+      // call takes) so the simulator works in API mode with no bank DB.
       const payload = {
+        external_id: reference,
         direction,
         account_id: form.account_id,
         amount: parseFloat(form.amount),
         currency: form.currency,
         channel: form.channel,
-        narration: form.narration || null,
         reference,
-        ...(direction === "OUTWARD"
-          ? { beneficiary_account: form.beneficiary_account, beneficiary_name: form.beneficiary_name }
-          : { sender_account: form.sender_account, sender_name: form.sender_name }),
+        counterparty_account: direction === "OUTWARD" ? form.beneficiary_account : form.sender_account,
+        counterparty_name: direction === "OUTWARD" ? form.beneficiary_name : form.sender_name,
       };
       const token = auth.token();
-      const res = await fetch("/api/transactions", {
+      const res = await fetch("/api/ingest/simulate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -23,9 +23,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.adapters.base import NormalizedTransaction
+from backend.auth import require_case_action
 from backend.config import bank_config, settings
 from backend.database import get_db, SessionLocal
-from backend.models import FraudCase, IngestedTransaction
+from backend.models import FraudCase, IngestedTransaction, User
 from backend.services import analyzer, callbacks, emailer, sanctions
 from backend.services.broadcaster import broadcaster
 
@@ -65,8 +66,9 @@ def _to_normalized(t: IngestedTransaction) -> NormalizedTransaction:
     )
 
 
-@router.post("/transactions", dependencies=[Depends(require_ingest_key)])
-async def ingest_transaction(body: TxnIn, db: AsyncSession = Depends(get_db)):
+async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
+    """Core ingestion: store, analyze, screen, case, notify. Shared by the
+    public API endpoint and the in-app simulator so both exercise identical logic."""
     ts = body.timestamp or datetime.utcnow()
 
     # Idempotency: same external_id -> return the existing verdict, don't re-case.
@@ -168,3 +170,17 @@ def _verdict(case: FraudCase, duplicate: bool = False) -> dict:
         "sar_recommended": case.sar_recommended,
         "reasons": case.reasons,
     }
+
+
+@router.post("/transactions", dependencies=[Depends(require_ingest_key)])
+async def ingest_transaction(body: TxnIn, db: AsyncSession = Depends(get_db)):
+    """Public push endpoint — institutions POST here with X-API-Key."""
+    return await run_ingest(body, db)
+
+
+@router.post("/simulate")
+async def simulate(body: TxnIn, db: AsyncSession = Depends(get_db),
+                   user: User = Depends(require_case_action)):
+    """In-app simulator — same engine, authenticated by the logged-in session
+    (no ingestion API key exposed to the browser). Works in any ingestion mode."""
+    return await run_ingest(body, db)
