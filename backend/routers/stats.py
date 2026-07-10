@@ -158,12 +158,14 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
 
 @router.get("/health", response_model=HealthOut)
 async def health(db: AsyncSession = Depends(get_db), _user: User = Depends(require_user)):
-    adapter = poller.get_adapter()
-    bank_ok = await adapter.is_connected()
+    from backend.config import bank_config
+    api_mode = (bank_config.get("monitoring", {}) or {}).get("mode", "poll") == "api"
+    bank_ok = False if api_mode else await poller.get_adapter().is_connected()
     running = poller.is_running()
     err = poller.last_error()
+    healthy = running and not err and (api_mode or bank_ok)
     return HealthOut(
-        status="ok" if (running and bank_ok and not err) else "degraded",
+        status="ok" if healthy else "degraded",
         bank_db_connected=bank_ok,
         poller_running=running,
         last_poll_at=poller.last_poll_at(),

@@ -226,6 +226,14 @@ async def poll_loop() -> None:
         monitoring = bank_config.get("monitoring", {})
         interval = int(monitoring.get("poll_interval_seconds", 30))
         history_days = int(monitoring.get("history_days", 90))
+
+        # API-only mode: institutions push transactions to /ingest — no bank DB
+        # is configured or touched. The poller idles.
+        if monitoring.get("mode", "poll") == "api":
+            _last_poll_at = datetime.utcnow()
+            _last_error = None
+            await asyncio.sleep(interval)
+            continue
         try:
             # Reconnect transparently if the bank DB was never up or dropped.
             if not await _ensure_connected(adapter):

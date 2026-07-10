@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, and_
@@ -9,6 +10,7 @@ from backend.database import get_db
 from backend.models import FraudCase, CaseAction, User
 from backend.routers import audit
 from backend.schemas import FraudCaseOut, FraudCaseListItem, CaseActionCreate, CasesPage
+from backend.services import callbacks
 
 router = APIRouter(prefix="/cases", tags=["cases"], dependencies=[Depends(require_user)])
 
@@ -120,6 +122,13 @@ async def add_action(
         user.username, f"CASE_{action_key}", target=case_id,
         detail=body.note, request=request,
     )
+
+    # Notify the institution's callback of the human disposition — the moment
+    # they learn "confirmed fraud, act on this account" (or "false positive").
+    if new_status and callbacks.is_configured():
+        payload = callbacks.case_payload(case)
+        payload["disposition"] = {"action": action_key, "by": user.username, "note": body.note}
+        asyncio.get_running_loop().run_in_executor(None, callbacks.post_event, "case.disposition", payload)
 
     result2 = await db.execute(
         select(FraudCase)

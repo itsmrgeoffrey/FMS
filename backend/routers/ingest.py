@@ -26,7 +26,7 @@ from backend.adapters.base import NormalizedTransaction
 from backend.config import bank_config, settings
 from backend.database import get_db, SessionLocal
 from backend.models import FraudCase, IngestedTransaction
-from backend.services import analyzer, emailer, sanctions
+from backend.services import analyzer, callbacks, emailer, sanctions
 from backend.services.broadcaster import broadcaster
 
 log = logging.getLogger(__name__)
@@ -150,6 +150,7 @@ async def ingest_transaction(body: TxnIn, db: AsyncSession = Depends(get_db)):
         loop = asyncio.get_running_loop()
         loop.run_in_executor(None, emailer.send_fraud_alert, payload)
         loop.run_in_executor(None, emailer.send_webhook_alert, payload)
+        loop.run_in_executor(None, callbacks.post_event, "case.flagged", callbacks.case_payload(case))
 
     return _verdict(case)
 

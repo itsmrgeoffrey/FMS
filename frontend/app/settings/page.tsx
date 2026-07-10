@@ -275,7 +275,7 @@ const TABS: { key: AdminTab; label: string; adminOnly?: boolean; planned?: boole
   { key: "users", label: "Users", adminOnly: true },
   { key: "roles", label: "Roles", adminOnly: true, planned: true },
   { key: "permissions", label: "Permissions", adminOnly: true, planned: true },
-  { key: "integrations", label: "API Integrations", adminOnly: true, planned: true },
+  { key: "integrations", label: "API Integrations", adminOnly: true },
 ];
 
 export default function SettingsPage() {
@@ -590,10 +590,25 @@ export default function SettingsPage() {
             monitoring: {
               poll_interval_seconds: Number(mon.poll_interval_seconds) || 30,
               history_days: Number(mon.history_days) || 90,
+              mode: mon.mode || "poll",
             },
           })
         }
       >
+        <div className="mb-4">
+          <label className="block text-xs text-gray-500 font-medium mb-1">Ingestion mode</label>
+          <select
+            value={mon.mode || "poll"}
+            onChange={(e) => set(["monitoring", "mode"], e.target.value)}
+            className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="api">API push only — no bank database access (recommended)</option>
+            <option value="poll">Poll a bank database (read-only)</option>
+          </select>
+          <p className="text-xs text-gray-400 mt-1">
+            In API mode, institutions POST transactions to /ingest/transactions and no database credentials are stored or used.
+          </p>
+        </div>
         <div className="grid grid-cols-2 gap-4">
           <Field
             label="Poll interval (seconds)"
@@ -799,13 +814,50 @@ export default function SettingsPage() {
         />
       )}
 
-      {tab === "integrations" && (
-        <ComingSoon
-          title="API Integrations"
-          blurb="Manage how external systems feed and receive data. The ingestion API key lives under System Settings → Security today; richer integration management is planned."
-          planned={["Ingestion API keys & rotation", "Outbound webhooks (new case / sanctions hit)", "Connectors for core banking / payment processors"]}
-        />
-      )}
+      {tab === "integrations" && (<>
+        <Section
+          title="Result Callback"
+          subtitle="FMS POSTs verdicts back to your system — case.flagged on detection, case.disposition when an analyst confirms or dismisses. Applied live"
+          saving={saving === "integrations"}
+          onSave={() =>
+            save("integrations", {
+              integrations: {
+                callback_url: data.integrations?.callback_url ?? "",
+                callback_secret: data.integrations?.callback_secret || "",
+              },
+            })
+          }
+        >
+          <div className="grid grid-cols-2 gap-4">
+            <Field
+              label="Callback URL"
+              value={data.integrations?.callback_url ?? ""}
+              placeholder="https://your-system.example.com/fms/events"
+              onChange={(v) => set(["integrations", "callback_url"], v)}
+              hint="Leave blank to disable outbound delivery."
+            />
+            <Field
+              label={`Signing secret ${data.integrations?.callback_secret_set ? "(set)" : "(not set)"}`}
+              value={data.integrations?.callback_secret ?? ""}
+              type="password"
+              placeholder="Leave blank to keep current"
+              onChange={(v) => set(["integrations", "callback_secret"], v)}
+              hint="Deliveries are HMAC-SHA256 signed (X-FMS-Signature header) so your system can verify they came from FMS."
+            />
+          </div>
+        </Section>
+
+        <section className="bg-white rounded-lg border border-gray-200 p-5">
+          <h2 className="text-sm font-semibold text-gray-700 mb-2">Inbound ingestion</h2>
+          <p className="text-sm text-gray-600">
+            Your system POSTs each transaction to <code className="font-mono text-xs bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">/ingest/transactions</code> with
+            an <code className="font-mono text-xs bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">X-API-Key</code> header and receives the risk verdict in the same response.
+          </p>
+          <p className="text-xs text-gray-400 mt-2">
+            The ingestion key is set on the server as <code className="font-mono">FMS_INGEST_API_KEY</code>. No bank database access is required in API mode (see System Settings → Monitoring).
+          </p>
+        </section>
+      </>)}
     </div>
   );
 }

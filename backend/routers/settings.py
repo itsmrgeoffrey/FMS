@@ -55,6 +55,12 @@ class DatabaseSettings(BaseModel):
 class MonitoringSettings(BaseModel):
     poll_interval_seconds: int | None = None
     history_days: int | None = None
+    mode: str | None = None            # "api" (push only, no bank DB) or "poll"
+
+
+class IntegrationsSettings(BaseModel):
+    callback_url: str | None = None
+    callback_secret: str | None = None  # empty = unchanged
 
 
 class InstitutionSettings(BaseModel):
@@ -88,6 +94,7 @@ class SettingsUpdate(BaseModel):
     database: DatabaseSettings | None = None
     tables: dict | None = None             # full tables mapping as edited
     rules: dict | None = None              # detection-rule overrides (live-applied)
+    integrations: IntegrationsSettings | None = None
     monitoring: MonitoringSettings | None = None
     institution: InstitutionSettings | None = None
     alerts: AlertSettings | None = None
@@ -149,6 +156,11 @@ async def get_settings():
         "monitoring": {
             "poll_interval_seconds": int(mon.get("poll_interval_seconds", 30)),
             "history_days": int(mon.get("history_days", 90)),
+            "mode": mon.get("mode", "poll"),
+        },
+        "integrations": {
+            "callback_url": (bank_config.get("integrations", {}) or {}).get("callback_url", ""),
+            "callback_secret_set": bool((bank_config.get("integrations", {}) or {}).get("callback_secret")),
         },
         "institution": {
             "name": inst.get("name", ""),
@@ -249,8 +261,19 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
             mon["poll_interval_seconds"] = max(5, int(body.monitoring.poll_interval_seconds))
         if body.monitoring.history_days is not None:
             mon["history_days"] = max(1, int(body.monitoring.history_days))
+        if body.monitoring.mode in ("api", "poll"):
+            mon["mode"] = body.monitoring.mode
         # Applies live — the poller re-reads monitoring settings every cycle.
         bank_config["monitoring"] = dict(mon)
+
+    if body.integrations is not None:
+        integ = data.setdefault("integrations", {})
+        if body.integrations.callback_url is not None:
+            integ["callback_url"] = body.integrations.callback_url.strip()
+        if body.integrations.callback_secret:  # empty = keep existing
+            integ["callback_secret"] = body.integrations.callback_secret
+        # Applies live — callbacks read config at send time.
+        bank_config["integrations"] = dict(integ)
 
     if body.institution is not None:
         inst = data.setdefault("institution", {})
@@ -261,7 +284,7 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
         # Applies live — FinCEN worksheets read institution at request time.
         bank_config["institution"] = dict(inst)
 
-    if any(x is not None for x in (body.database, body.tables, body.monitoring, body.institution, body.rules)):
+    if any(x is not None for x in (body.database, body.tables, body.monitoring, body.institution, body.rules, body.integrations)):
         _write_yaml(data)
 
     env_updates: dict[str, str] = {}
@@ -302,7 +325,7 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
     if env_updates:
         _update_env(env_updates)
 
-    sections = [k for k in ("database", "tables", "rules", "monitoring", "institution", "alerts", "llm", "security")
+    sections = [k for k in ("database", "tables", "rules", "monitoring", "institution", "alerts", "llm", "security", "integrations")
                 if getattr(body, k) is not None]
     detail = ", ".join(sections) or None
     if db_changes:
