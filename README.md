@@ -14,7 +14,7 @@ Financial-crime detection protects the integrity of the payment system — money
 
 ## What it does
 
-- **Two ingestion modes** — poll your core/transaction database read-only (MySQL, SQL Server, PostgreSQL, Oracle), **or push events to the ingestion API** (`POST /ingest/transactions`, API-key auth) and receive the risk verdict synchronously — no database access required.
+- **Two first-class ingestion modes** — **API push** for partners who won't share database access (they `POST /ingest/transactions` with API-key auth and receive the risk verdict synchronously), **or database poll** for in-house/on-prem deployments where FMS reads your core banking database read-only (MySQL, SQL Server, PostgreSQL, Oracle). Outbound webhooks/callbacks work in both.
 - **Transparent risk engine** — a fully deterministic scorer (no black box) covering:
   - Near-threshold "structuring" amounts and repeated near-misses
   - Velocity clustering across a rolling window

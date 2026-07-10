@@ -602,11 +602,12 @@ export default function SettingsPage() {
             onChange={(e) => set(["monitoring", "mode"], e.target.value)}
             className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="api">API push only — no bank database access (recommended)</option>
-            <option value="poll">Poll a bank database (read-only)</option>
+            <option value="api">API push — institutions send transactions to FMS (no DB access)</option>
+            <option value="poll">Database poll — FMS reads your core banking DB (in-house / on-prem)</option>
           </select>
           <p className="text-xs text-gray-400 mt-1">
-            In API mode, institutions POST transactions to /ingest/transactions and no database credentials are stored or used.
+            Both are first-class. <strong>API push</strong> suits partners who won&apos;t share database access (they POST to <code className="font-mono">/ingest/transactions</code>).
+            {" "}<strong>Database poll</strong> suits in-house deployments where FMS reads your own core (read-only). Outbound webhooks/callbacks work in either mode.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
