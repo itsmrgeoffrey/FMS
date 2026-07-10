@@ -63,6 +63,18 @@ class IntegrationsSettings(BaseModel):
     callback_secret: str | None = None  # empty = unchanged
 
 
+class DirectorySettings(BaseModel):
+    enabled: bool | None = None
+    server_uri: str | None = None
+    start_tls: bool | None = None
+    bind_user_template: str | None = None
+    base_dn: str | None = None
+    user_search: str | None = None
+    email_domain: str | None = None
+    default_role: str | None = None
+    group_role_map: dict | None = None
+
+
 class InstitutionSettings(BaseModel):
     name: str | None = None
     ein: str | None = None
@@ -95,6 +107,7 @@ class SettingsUpdate(BaseModel):
     tables: dict | None = None             # full tables mapping as edited
     rules: dict | None = None              # detection-rule overrides (live-applied)
     integrations: IntegrationsSettings | None = None
+    directory: DirectorySettings | None = None
     monitoring: MonitoringSettings | None = None
     institution: InstitutionSettings | None = None
     alerts: AlertSettings | None = None
@@ -139,6 +152,7 @@ async def get_settings():
     db = bank_config.get("database", {}) or {}
     mon = bank_config.get("monitoring", {}) or {}
     inst = bank_config.get("institution", {}) or {}
+    _dir = bank_config.get("directory", {}) or {}
     return {
         "database": {
             "type": db.get("type", "mysql"),
@@ -161,6 +175,17 @@ async def get_settings():
         "integrations": {
             "callback_url": (bank_config.get("integrations", {}) or {}).get("callback_url", ""),
             "callback_secret_set": bool((bank_config.get("integrations", {}) or {}).get("callback_secret")),
+        },
+        "directory": {
+            "enabled": bool(_dir.get("enabled", False)),
+            "server_uri": _dir.get("server_uri", ""),
+            "start_tls": bool(_dir.get("start_tls", False)),
+            "bind_user_template": _dir.get("bind_user_template", ""),
+            "base_dn": _dir.get("base_dn", ""),
+            "user_search": _dir.get("user_search", "(sAMAccountName={username})"),
+            "email_domain": _dir.get("email_domain", ""),
+            "default_role": _dir.get("default_role", "viewer"),
+            "group_role_map": _dir.get("group_role_map", {}) or {},
         },
         "institution": {
             "name": inst.get("name", ""),
@@ -203,6 +228,14 @@ async def test_connection(user: User = Depends(require_admin)):
         return {"connected": False, "message": "Could not establish a connection."}
     except Exception as e:
         return {"connected": False, "message": f"Connection failed: {e}"}
+
+
+@router.post("/test-directory")
+async def test_directory(user: User = Depends(require_admin)):
+    """Check the configured LDAP/AD server is reachable."""
+    from backend.services import ldap_auth
+    ok, message = ldap_auth.test_connection()
+    return {"connected": ok, "message": message, "enabled": ldap_auth.is_enabled()}
 
 
 @router.get("/system-info")
@@ -275,6 +308,16 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
         # Applies live — callbacks read config at send time.
         bank_config["integrations"] = dict(integ)
 
+    if body.directory is not None:
+        d = data.setdefault("directory", {})
+        for field in ("enabled", "server_uri", "start_tls", "bind_user_template",
+                      "base_dn", "user_search", "email_domain", "default_role", "group_role_map"):
+            value = getattr(body.directory, field)
+            if value is not None:
+                d[field] = value
+        # Applies live — the login flow reads directory config per request.
+        bank_config["directory"] = dict(d)
+
     if body.institution is not None:
         inst = data.setdefault("institution", {})
         for field in ("name", "ein", "address", "city", "state", "zip", "primary_regulator"):
@@ -284,7 +327,7 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
         # Applies live — FinCEN worksheets read institution at request time.
         bank_config["institution"] = dict(inst)
 
-    if any(x is not None for x in (body.database, body.tables, body.monitoring, body.institution, body.rules, body.integrations)):
+    if any(x is not None for x in (body.database, body.tables, body.monitoring, body.institution, body.rules, body.integrations, body.directory)):
         _write_yaml(data)
 
     env_updates: dict[str, str] = {}
@@ -325,7 +368,7 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
     if env_updates:
         _update_env(env_updates)
 
-    sections = [k for k in ("database", "tables", "rules", "monitoring", "institution", "alerts", "llm", "security", "integrations")
+    sections = [k for k in ("database", "tables", "rules", "monitoring", "institution", "alerts", "llm", "security", "integrations", "directory")
                 if getattr(body, k) is not None]
     detail = ", ".join(sections) or None
     if db_changes:

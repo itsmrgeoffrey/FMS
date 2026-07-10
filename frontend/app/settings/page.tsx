@@ -267,12 +267,13 @@ function ComingSoon({ title, blurb, planned }: { title: string; blurb: string; p
   );
 }
 
-type AdminTab = "system" | "account" | "users" | "roles" | "permissions" | "integrations";
+type AdminTab = "system" | "account" | "users" | "directory" | "roles" | "permissions" | "integrations";
 
 const TABS: { key: AdminTab; label: string; adminOnly?: boolean; planned?: boolean }[] = [
   { key: "system", label: "System Settings" },
   { key: "account", label: "My Account" },
   { key: "users", label: "Users", adminOnly: true },
+  { key: "directory", label: "Directory (SSO)", adminOnly: true },
   { key: "roles", label: "Roles", adminOnly: true, planned: true },
   { key: "permissions", label: "Permissions", adminOnly: true, planned: true },
   { key: "integrations", label: "API Integrations", adminOnly: true },
@@ -288,6 +289,8 @@ export default function SettingsPage() {
   const [health, setHealth] = useState<{ bank_db_connected: boolean; last_poll_at: string | null } | null>(null);
   const [testResult, setTestResult] = useState<{ connected: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [dirTest, setDirTest] = useState<{ connected: boolean; message: string } | null>(null);
+  const [dirTesting, setDirTesting] = useState(false);
   const [activity, setActivity] = useState<AuditEntry[]>([]);
   const pristine = useRef<string>("");
   const isAdmin = auth.user()?.role === "admin";
@@ -798,6 +801,81 @@ export default function SettingsPage() {
       {tab === "account" && <MyAccountSection />}
 
       {tab === "users" && isAdmin && <UsersSection />}
+
+      {tab === "directory" && (() => {
+        const dir = data.directory ?? {};
+        const gmap: Record<string, string> = dir.group_role_map ?? {};
+        return (
+          <Section
+            title="Directory (LDAP / Active Directory)"
+            subtitle="Optional single sign-on. When enabled, users authenticate against your directory and are auto-provisioned on first login. Built-in accounts keep working. Applied live"
+            saving={saving === "directory"}
+            onSave={() => save("directory", { directory: {
+              enabled: !!dir.enabled, server_uri: dir.server_uri ?? "", start_tls: !!dir.start_tls,
+              bind_user_template: dir.bind_user_template ?? "", base_dn: dir.base_dn ?? "",
+              user_search: dir.user_search ?? "(sAMAccountName={username})",
+              email_domain: dir.email_domain ?? "", default_role: dir.default_role ?? "viewer",
+              group_role_map: gmap,
+            } })}
+          >
+            <label className="flex items-center gap-2 mb-4 text-sm text-gray-700">
+              <input type="checkbox" checked={!!dir.enabled} onChange={(e) => set(["directory", "enabled"], e.target.checked)} className="rounded border-gray-300" />
+              Enable directory sign-in
+            </label>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Server URI" value={dir.server_uri ?? ""} onChange={(v) => set(["directory", "server_uri"], v)} placeholder="ldaps://dc.example.com:636" />
+              <Field label="Bind template" value={dir.bind_user_template ?? ""} onChange={(v) => set(["directory", "bind_user_template"], v)} placeholder="{username}@example.com" hint="How a username maps to a bind DN. {username} is substituted." />
+              <Field label="Base DN (for group lookup)" value={dir.base_dn ?? ""} onChange={(v) => set(["directory", "base_dn"], v)} placeholder="DC=example,DC=com" />
+              <Field label="User search filter" value={dir.user_search ?? ""} onChange={(v) => set(["directory", "user_search"], v)} placeholder="(sAMAccountName={username})" />
+              <Field label="Email domain (fallback)" value={dir.email_domain ?? ""} onChange={(v) => set(["directory", "email_domain"], v)} placeholder="example.com" />
+              <div>
+                <label className="block text-xs text-gray-500 font-medium mb-1">Default role (no group match)</label>
+                <select value={dir.default_role ?? "viewer"} onChange={(e) => set(["directory", "default_role"], e.target.value)}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {["viewer", "analyst", "admin"].map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 mt-4 text-sm text-gray-700">
+              <input type="checkbox" checked={!!dir.start_tls} onChange={(e) => set(["directory", "start_tls"], e.target.checked)} className="rounded border-gray-300" />
+              Use StartTLS (for ldap:// connections)
+            </label>
+
+            {/* Group -> role mapping */}
+            <div className="mt-5 pt-4 border-t border-gray-100">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Group → role mapping</p>
+              <div className="space-y-2">
+                {Object.entries(gmap).map(([group, role], i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input value={group} placeholder="AD group name (CN)"
+                      onChange={(e) => setData((p: any) => { const n = structuredClone(p); const m = n.directory.group_role_map ?? {}; const v = m[group]; delete m[group]; m[e.target.value] = v; n.directory.group_role_map = m; return n; })}
+                      className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <select value={role}
+                      onChange={(e) => setData((p: any) => { const n = structuredClone(p); n.directory.group_role_map = { ...(n.directory.group_role_map ?? {}), [group]: e.target.value }; return n; })}
+                      className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                      {["viewer", "analyst", "admin"].map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    <button type="button" onClick={() => setData((p: any) => { const n = structuredClone(p); delete n.directory.group_role_map[group]; return n; })}
+                      className="text-xs text-gray-400 hover:text-red-600 px-2">Remove</button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setData((p: any) => { const n = structuredClone(p); n.directory = n.directory ?? {}; n.directory.group_role_map = { ...(n.directory.group_role_map ?? {}), "": "analyst" }; return n; })}
+                  className="text-xs text-blue-600 hover:text-blue-800">+ Add mapping</button>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <button type="button" disabled={dirTesting}
+                onClick={async () => { setDirTesting(true); setDirTest(null); try { setDirTest(await api.testDirectory()); } catch (e) { setDirTest({ connected: false, message: String(e) }); } finally { setDirTesting(false); } }}
+                className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                {dirTesting ? "Testing…" : "Test Directory Connection"}
+              </button>
+              {dirTest && <span className={`text-sm ${dirTest.connected ? "text-green-600" : "text-red-600"}`}>{dirTest.connected ? "✓ " : "✗ "}{dirTest.message}</span>}
+              <span className="text-xs text-gray-400">Save first, then test the saved settings.</span>
+            </div>
+          </Section>
+        );
+      })()}
 
       {tab === "roles" && (
         <ComingSoon

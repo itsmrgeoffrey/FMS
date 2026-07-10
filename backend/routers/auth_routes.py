@@ -18,7 +18,7 @@ from backend.routers import audit
 from backend.schemas import (
     ForgotPasswordRequest, LoginRequest, SignupRequest, TokenResponse, UserOut,
 )
-from backend.services import emailer
+from backend.services import emailer, ldap_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 log = logging.getLogger(__name__)
@@ -104,9 +104,31 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     user = (await db.execute(
         select(User).where((User.email == email) | (User.username == email))
     )).scalar_one_or_none()
-    if not user or not verify_password(body.password, user.password_hash):
+
+    # 1) Local password auth (always tried first, so the built-in admin keeps
+    #    working even if the directory is down or misconfigured).
+    if user and verify_password(body.password, user.password_hash):
+        auth_via = "local"
+    # 2) Directory (LDAP/AD) auth, if enabled — verifies against AD and
+    #    auto-provisions/updates the local user record.
+    elif ldap_auth.is_enabled():
+        import asyncio
+        raw_id = body.email.strip()
+        try:
+            info = await asyncio.get_running_loop().run_in_executor(
+                None, ldap_auth.authenticate, raw_id, body.password)
+        except RuntimeError as e:
+            log.error(f"Directory auth error for {raw_id!r}: {e}")
+            info = None
+        if not info:
+            _LOGIN_ATTEMPTS[ip].append(time.time())
+            log.warning(f"Failed directory login for {raw_id!r}")
+            await audit.record(raw_id, "LOGIN_FAILED", detail="directory", request=request)
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        user = await _upsert_directory_user(db, info)
+        auth_via = "directory"
+    else:
         _LOGIN_ATTEMPTS[ip].append(time.time())
-        # Failed login — logged for security monitoring (identifier only, never the password).
         log.warning(f"Failed login attempt for email={email!r}")
         await audit.record(email, "LOGIN_FAILED", request=request)
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -119,8 +141,34 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     await db.commit()
     await db.refresh(user)
 
-    await audit.record(user.username, "LOGIN", request=request)
+    await audit.record(user.username, "LOGIN", detail=auth_via if auth_via != "local" else None, request=request)
     return TokenResponse(token=create_token(user), user=UserOut.model_validate(user))
+
+
+async def _upsert_directory_user(db: AsyncSession, info: dict) -> User:
+    """Create or update the local record for a directory-authenticated user.
+    Directory users have no usable local password (they authenticate via AD)."""
+    username = info["username"]
+    user = (await db.execute(
+        select(User).where((User.username == username) | (User.email == (info.get("email") or "\0")))
+    )).scalar_one_or_none()
+    if user:
+        # Keep role/attributes in sync with the directory on each login.
+        user.role = info["role"]
+        if info.get("email"):
+            user.email = info["email"]
+        if info.get("full_name"):
+            user.full_name = info["full_name"]
+    else:
+        user = User(
+            username=username, email=info.get("email"), full_name=info.get("full_name"),
+            password_hash=hash_password(secrets.token_urlsafe(32)),  # unusable locally
+            role=info["role"], last_login_at=datetime.utcnow(),
+        )
+        db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
 
 
 @router.get("/me", response_model=UserOut)

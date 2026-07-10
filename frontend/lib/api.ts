@@ -102,6 +102,9 @@ export const api = {
   testConnection: (): Promise<{ connected: boolean; message: string; db_type?: string }> =>
     req("/settings/test-connection", { method: "POST" }),
 
+  testDirectory: (): Promise<{ connected: boolean; message: string; enabled: boolean }> =>
+    req("/settings/test-directory", { method: "POST" }),
+
   getSystemInfo: (): Promise<Record<string, any>> => req("/settings/system-info"),  // eslint-disable-line @typescript-eslint/no-explicit-any
 
   getHealth: (): Promise<{ status: string; bank_db_connected: boolean; poller_running: boolean; last_poll_at: string | null; last_error: string | null }> =>
