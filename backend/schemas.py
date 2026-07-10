@@ -102,6 +102,7 @@ class SignupRequest(BaseModel):
     email: str
     password: str
     full_name: str | None = None
+    setup_token: str | None = None
 
 
 class LoginRequest(BaseModel):

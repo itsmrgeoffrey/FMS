@@ -15,7 +15,7 @@ import csv
 import io
 from datetime import datetime, date, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.auth import require_user
 from backend.config import bank_config
 from backend.database import get_db
-from backend.models import FraudCase
+from backend.models import FraudCase, User
+from backend.routers import audit
 
 # A SAR must generally be filed within 30 calendar days of initial detection
 # (31 CFR 1020.320(b)(3)); FMS uses the case creation time as the detection date.
@@ -186,12 +187,15 @@ async def _fetch(db: AsyncSession, condition, date_from, date_to) -> list[FraudC
 
 @router.get("/ctr")
 async def ctr_report(
+    request: Request,
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     format: str = Query("json", pattern="^(json|csv|fincen)$"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ):
     cases = await _fetch(db, FraudCase.ctr_required == True, date_from, date_to)  # noqa: E712
+    await audit.record(user.username, "REPORT_CTR_ACCESSED", detail=f"format={format}; count={len(cases)}", request=request)
     if format == "fincen":
         return {
             "report": "CTR filing worksheets (FinCEN Form 112)",
@@ -208,12 +212,15 @@ async def ctr_report(
 
 @router.get("/sar")
 async def sar_report(
+    request: Request,
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     format: str = Query("json", pattern="^(json|csv|fincen)$"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ):
     cases = await _fetch(db, FraudCase.sar_recommended == True, date_from, date_to)  # noqa: E712
+    await audit.record(user.username, "REPORT_SAR_ACCESSED", detail=f"format={format}; count={len(cases)}", request=request)
     if format == "fincen":
         return {
             "report": "SAR filing worksheets (FinCEN Form 111)",

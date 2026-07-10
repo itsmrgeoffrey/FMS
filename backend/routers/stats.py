@@ -1,6 +1,6 @@
 from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, and_, cast, Date
+from sqlalchemy import select, func, and_, cast, Date, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth import require_user
@@ -78,8 +78,8 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     q = await db.execute(
         select(
             day,
-            func.sum(func.iif(FraudCase.status != "CLEAN", 1, 0)),
-            func.sum(func.iif(FraudCase.status == "CLEAN", 1, 0)),
+            func.sum(case((FraudCase.status != "CLEAN", 1), else_=0)),
+            func.sum(case((FraudCase.status == "CLEAN", 1), else_=0)),
         )
         .where(FraudCase.created_at >= cutoff)
         .group_by(day)
@@ -157,7 +157,7 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
 
 
 @router.get("/health", response_model=HealthOut)
-async def health(db: AsyncSession = Depends(get_db)):
+async def health(db: AsyncSession = Depends(get_db), _user: User = Depends(require_user)):
     adapter = poller.get_adapter()
     bank_ok = await adapter.is_connected()
     running = poller.is_running()

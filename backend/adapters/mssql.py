@@ -4,7 +4,7 @@ import threading
 import pyodbc
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from backend.adapters.base import BaseAdapter, NormalizedTransaction
+from backend.adapters.base import BaseAdapter, NormalizedTransaction, validate_identifier
 
 log = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -71,10 +71,11 @@ class MSSQLAdapter(BaseAdapter):
             return False
 
     def _col(self, table_key: str, field: str) -> str | None:
-        return self._tables.get(table_key, {}).get("columns", {}).get(field)
+        col = self._tables.get(table_key, {}).get("columns", {}).get(field)
+        return validate_identifier(col, f"{table_key}.{field} column") if col else None
 
     def _table_name(self, table_key: str) -> str:
-        return self._tables[table_key]["table_name"]
+        return validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
 
     def _row_to_txn(self, row: dict, table_key: str) -> NormalizedTransaction:
         cols = self._tables[table_key]["columns"]

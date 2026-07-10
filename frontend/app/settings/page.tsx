@@ -714,7 +714,7 @@ export default function SettingsPage() {
             type="password"
             placeholder="Set to require X-API-Key on all requests"
             onChange={(v) => set(["security", "fms_api_key"], v)}
-            hint="Takes effect immediately. The frontend must send the same key (NEXT_PUBLIC_FMS_API_KEY) — configure both together."
+            hint="Takes effect immediately. Machine API keys must stay server-side; do not expose this value in NEXT_PUBLIC_* variables."
           />
         </div>
       </Section>

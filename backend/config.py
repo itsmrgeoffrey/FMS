@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     auth_secret: str = os.getenv("FMS_AUTH_SECRET", "")
     # Hours a login token stays valid.
     auth_token_ttl_hours: int = int(os.getenv("FMS_AUTH_TOKEN_TTL_HOURS", "12"))
+    # Public signup is disabled after bootstrap unless explicitly enabled.
+    allow_signup: bool = os.getenv("FMS_ALLOW_SIGNUP", "false").strip().lower() in ("1", "true", "yes", "on")
+    # Required for first-admin bootstrap outside development.
+    setup_token: str = os.getenv("FMS_SETUP_TOKEN", "")
+    # Only trust X-Forwarded-For when the app is behind a trusted reverse proxy.
+    trust_x_forwarded_for: bool = os.getenv("FMS_TRUST_X_FORWARDED_FOR", "false").strip().lower() in ("1", "true", "yes", "on")
 
     class Config:
         env_file = ROOT / ".env"

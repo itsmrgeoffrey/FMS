@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import asyncpg
 
-from backend.adapters.base import BaseAdapter, NormalizedTransaction
+from backend.adapters.base import BaseAdapter, NormalizedTransaction, validate_identifier
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +41,8 @@ class PostgresAdapter(BaseAdapter):
             return False
 
     def _col(self, table_key: str, field: str) -> str | None:
-        return self._tables.get(table_key, {}).get("columns", {}).get(field)
+        col = self._tables.get(table_key, {}).get("columns", {}).get(field)
+        return validate_identifier(col, f"{table_key}.{field} column") if col else None
 
     def _row_to_txn(self, row, table_key: str) -> NormalizedTransaction:
         cols = self._tables[table_key]["columns"]
@@ -74,7 +75,7 @@ class PostgresAdapter(BaseAdapter):
     async def fetch_new_transactions(self, table_key, since_id, limit=100):
         if table_key not in self._tables:
             return []
-        table = self._tables[table_key]["table_name"]
+        table = validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
         id_col = self._col(table_key, "id")
         if not since_id:
             return []
@@ -89,7 +90,7 @@ class PostgresAdapter(BaseAdapter):
         for table_key in table_keys:
             if table_key not in self._tables:
                 continue
-            table = self._tables[table_key]["table_name"]
+            table = validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
             acc, ts = self._col(table_key, "account_id"), self._col(table_key, "timestamp")
             sql = f'SELECT * FROM "{table}" WHERE "{acc}" = $1 AND "{ts}" >= $2 ORDER BY "{ts}" DESC'
             async with self._pool.acquire() as conn:
@@ -101,7 +102,7 @@ class PostgresAdapter(BaseAdapter):
     async def get_last_id(self, table_key):
         if table_key not in self._tables:
             return None
-        table = self._tables[table_key]["table_name"]
+        table = validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
         id_col, ts_col = self._col(table_key, "id"), self._col(table_key, "timestamp")
         sql = f'SELECT "{id_col}" FROM "{table}" ORDER BY "{ts_col}" DESC LIMIT 1'
         async with self._pool.acquire() as conn:

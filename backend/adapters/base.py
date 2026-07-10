@@ -1,6 +1,17 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+import re
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def validate_identifier(value: str | None, label: str = "identifier") -> str:
+    """Validate table/column identifiers before interpolating them into SQL."""
+    if not value or not _IDENTIFIER_RE.fullmatch(str(value)):
+        raise ValueError(f"Invalid SQL {label}: {value!r}")
+    return str(value)
+
 
 
 @dataclass

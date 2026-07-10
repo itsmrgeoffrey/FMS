@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth import VALID_ROLES, create_token, hash_password, require_admin, require_user, verify_password
+from backend.config import ENVIRONMENT, settings
 from backend.database import get_db
 from backend.models import User
 from backend.routers import audit
@@ -65,8 +66,15 @@ async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depen
     if exists:
         raise HTTPException(status_code=409, detail="An account with that email already exists")
 
-    # First user to register becomes admin.
+    # First user to register becomes admin, but production bootstrap must be
+    # intentional. After bootstrap, public signup is off unless explicitly enabled.
     is_first = (await db.execute(select(func.count()).select_from(User))).scalar_one() == 0
+    if is_first:
+        if ENVIRONMENT.lower() != "development":
+            if not settings.setup_token or body.setup_token != settings.setup_token:
+                raise HTTPException(status_code=403, detail="Setup token required for first admin")
+    elif not settings.allow_signup:
+        raise HTTPException(status_code=403, detail="Signup is disabled. Ask an admin to create your account.")
 
     user = User(
         username=email,            # username mirrors email; login is by email

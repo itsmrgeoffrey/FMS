@@ -19,7 +19,7 @@ const ICONS = {
   demo: "M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z",
 };
 
-const NAV_GROUPS: { section: string; requires?: string; items: { href: string; label: string; d: string }[] }[] = [
+const NAV_GROUPS: { section: string; requires?: string; items: { href: string; label: string; d: string; requires?: string }[] }[] = [
   { section: "Overview", items: [
     { href: "/dashboard", label: "Dashboard", d: ICONS.dashboard },
     { href: "/analytics", label: "Analytics", d: ICONS.analytics },
@@ -35,7 +35,7 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
   ] },
   { section: "Compliance", items: [
     { href: "/reports", label: "Reports (SAR/STR)", d: ICONS.reports },
-    { href: "/audit", label: "Audit Trail", d: ICONS.audit },
+    { href: "/audit", label: "Audit Trail", d: ICONS.audit, requires: "admin" },
   ] },
   { section: "System", requires: "admin", items: [
     { href: "/settings", label: "Administration", d: ICONS.admin },
@@ -90,18 +90,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <p className="text-white font-bold text-lg tracking-tight">FMS</p>
           <p className="text-slate-400 text-xs mt-0.5">Fraud Monitoring System</p>
         </div>
-        <div className="px-3 pt-3">
-          <input
-            placeholder="Search account, case…"
-            onKeyDown={(e) => {
-              const v = (e.target as HTMLInputElement).value.trim();
-              if (e.key === "Enter" && v.length >= 2) router.push(`/search?q=${encodeURIComponent(v)}`);
-            }}
-            className="w-full text-sm bg-slate-800 text-slate-200 placeholder-slate-500 border border-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
-          {NAV_GROUPS.filter((g) => !g.requires || can(user.role, g.requires)).map((group) => {
+          {NAV_GROUPS
+            .filter((g) => !g.requires || can(user.role, g.requires))
+            .map((g) => ({ ...g, items: g.items.filter((n) => !n.requires || can(user.role, n.requires)) }))
+            .filter((g) => g.items.length > 0)
+            .map((group) => {
             const isCollapsed = collapsed[group.section];
             return (
               <div key={group.section}>

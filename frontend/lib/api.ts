@@ -1,8 +1,6 @@
 import type { CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig, AnalyticsKpis } from "@/types";
 
 const BASE = "/api";
-// Optional — only needed if the backend has FMS_API_KEY set (machine auth).
-const API_KEY = process.env.NEXT_PUBLIC_FMS_API_KEY;
 
 const TOKEN_KEY = "fms.token";
 const USER_KEY = "fms.user";
@@ -36,7 +34,6 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   const headers = { ...extra };
   const token = auth.token();
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  if (API_KEY) headers["X-API-Key"] = API_KEY;
   return headers;
 }
 
@@ -137,7 +134,10 @@ export const api = {
     }),
 
   // Activity log
-  getAudit: (limit = 50): Promise<AuditEntry[]> => req(`/audit?limit=${limit}`),
+  getAudit: (limit = 50, username?: string): Promise<AuditEntry[]> =>
+    req(`/audit?limit=${limit}${username ? `&username=${encodeURIComponent(username)}` : ""}`),
+  getAuditUsers: (): Promise<{ username: string; actions: number; failed_logins: number; case_actions: number; last_activity: string | null }[]> =>
+    req("/audit/users"),
 
   // Account + user management
   changePassword: (current_password: string, new_password: string): Promise<{ changed: boolean }> =>

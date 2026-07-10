@@ -2,7 +2,7 @@
 from datetime import datetime, date
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth import require_user
@@ -27,10 +27,10 @@ async def customers(
         select(
             FraudCase.account_id,
             func.count().label("txns"),
-            func.sum(func.iif(FraudCase.status != "CLEAN", 1, 0)).label("flagged"),
-            func.sum(func.iif(FraudCase.status.in_(OPEN_STATUSES), 1, 0)).label("open"),
-            func.sum(func.iif(FraudCase.sanctions_hit == True, 1, 0)).label("sanctions"),  # noqa: E712
-            func.sum(func.iif(FraudCase.sar_recommended == True, 1, 0)).label("sar"),        # noqa: E712
+            func.sum(case((FraudCase.status != "CLEAN", 1), else_=0)).label("flagged"),
+            func.sum(case((FraudCase.status.in_(OPEN_STATUSES), 1), else_=0)).label("open"),
+            func.sum(case((FraudCase.sanctions_hit == True, 1), else_=0)).label("sanctions"),  # noqa: E712
+            func.sum(case((FraudCase.sar_recommended == True, 1), else_=0)).label("sar"),        # noqa: E712
             func.max(FraudCase.risk_score).label("max_risk"),
             func.sum(FraudCase.amount).label("total_amount"),
             func.max(FraudCase.currency).label("currency"),

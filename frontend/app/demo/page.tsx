@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import Link from "next/link";
+import { auth } from "@/lib/api";
 
 type Direction = "OUTWARD" | "INWARD";
 type Stage = "home" | "transfer" | "confirm" | "processing" | "success" | "error";
@@ -38,6 +38,7 @@ export default function DemoPage() {
   const [dots, setDots] = useState(".");
   const [acctError, setAcctError] = useState("");
   const [recentTxns, setRecentTxns] = useState<RecentTxn[]>([]);
+  const [lastReference, setLastReference] = useState("");
 
   const [form, setForm] = useState({
     account_id: "0123456789",
@@ -83,6 +84,7 @@ export default function DemoPage() {
       set("beneficiary_name", "");
     } else {
       setAcctError("");
+    setLastReference("");
       // Test validation — auto-populate name
       set("beneficiary_name", "Larry Bird");
     }
@@ -92,6 +94,8 @@ export default function DemoPage() {
     setStage("processing");
     setError("");
     try {
+      const reference = `TRF/${Date.now()}`;
+      setLastReference(reference);
       const payload = {
         direction,
         account_id: form.account_id,
@@ -99,14 +103,18 @@ export default function DemoPage() {
         currency: form.currency,
         channel: form.channel,
         narration: form.narration || null,
-        reference: `TRF/${Date.now()}`,
+        reference,
         ...(direction === "OUTWARD"
           ? { beneficiary_account: form.beneficiary_account, beneficiary_name: form.beneficiary_name }
           : { sender_account: form.sender_account, sender_name: form.sender_name }),
       };
+      const token = auth.token();
       const res = await fetch("/api/transactions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -122,6 +130,7 @@ export default function DemoPage() {
     setStage("home");
     setForm(f => ({ ...f, amount: "", beneficiary_account: "", beneficiary_name: "", sender_account: "", sender_name: "", narration: "" }));
     setAcctError("");
+    setLastReference("");
   }
 
   return (
@@ -435,7 +444,7 @@ export default function DemoPage() {
               <div className="w-full bg-gray-50 rounded-2xl p-5 space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-400">Reference</span>
-                  <span className="text-gray-700 font-mono text-xs">TRF/{Date.now().toString().slice(-8)}</span>
+                  <span className="text-gray-700 font-mono text-xs">{lastReference || "TRF/PENDING"}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-400">{direction === "OUTWARD" ? "Beneficiary" : "Sender"}</span>

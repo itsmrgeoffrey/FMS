@@ -1,9 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from backend.adapters.base import validate_identifier
+from backend.auth import require_admin
+from backend.config import ENVIRONMENT, bank_config
+from backend.models import User
 from backend.services.poller import get_adapter
-from backend.config import bank_config
 
-router = APIRouter(prefix="/transactions", tags=["transactions"])
+router = APIRouter(
+    prefix="/transactions",
+    tags=["transactions"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 class TransactionPayload(BaseModel):
@@ -21,7 +28,10 @@ class TransactionPayload(BaseModel):
 
 
 @router.post("")
-async def inject_transaction(payload: TransactionPayload):
+async def inject_transaction(payload: TransactionPayload, _admin: User = Depends(require_admin)):
+    if ENVIRONMENT.lower() != "development":
+        raise HTTPException(status_code=404, detail="Demo transaction injection is disabled")
+
     adapter = get_adapter()
 
     if not await adapter.is_connected():
@@ -33,7 +43,7 @@ async def inject_transaction(payload: TransactionPayload):
     if table_key not in tables:
         raise HTTPException(status_code=400, detail=f"No '{table_key}' table configured")
 
-    table_name = tables[table_key]["table_name"]
+    table_name = validate_identifier(tables[table_key]["table_name"], "table name")
 
     if payload.direction == "OUTWARD":
         sql = f"""
@@ -61,7 +71,7 @@ async def inject_transaction(payload: TransactionPayload):
         )
 
     # Route through the adapter so the write is serialized on the same lock as
-    # the poller's reads — a bare adapter._conn.execute() on a separate thread
+    # the poller's reads - a bare adapter._conn.execute() on a separate thread
     # pool races the poller and trips "connection is busy".
     if not hasattr(adapter, "execute_write"):
         raise HTTPException(status_code=501, detail="Active adapter does not support writes")
