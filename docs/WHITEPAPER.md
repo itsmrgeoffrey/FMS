@@ -103,6 +103,8 @@ Alerts become **cases** with a lifecycle (open → under review → confirmed / 
 
 Access control is a three-tier model enforced server-side: **administrators** (full access including configuration and user management), **analysts** (view and act on cases), and **viewers** (read-only). The interface reflects these roles, but enforcement lives in the API — a viewer's request to action a case is rejected with 403 regardless of what the client renders. Authentication uses email + password with PBKDF2-hashed credentials, HMAC-signed expiring session tokens, per-IP login throttling, and admin-driven or email-based password recovery.
 
+For institutional deployments, FMS optionally federates authentication to an organization's **LDAP / Active Directory**: when enabled, users sign in with their directory credentials, FMS binds to verify the password, maps their directory groups to an FMS role, and auto-provisions a local record on first login (no directory password is stored). Local accounts continue to work in parallel, so a misconfigured or unreachable directory never locks administrators out. This lets institutions manage FMS access through their existing identity governance rather than a separate user store.
+
 ## 7. Regulatory outputs
 
 FMS maintains two filing pipelines:

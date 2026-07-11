@@ -173,7 +173,12 @@ Change your own password (all roles have this — non-admins reach it via the **
 
 **Forgot password?** Users can request a reset from the sign-in page (requires email to be configured), or ask an admin to reset it here.
 
-### 8.10 Roles / Permissions / API Integrations
+### 8.10 Directory (SSO — LDAP / Active Directory)
+Optionally let staff sign in with their existing Active Directory / LDAP credentials instead of separate FMS passwords. Configure the server URI (`ldaps://…`), the bind template (how a username becomes a bind DN, e.g. `{username}@yourbank.com`), the base DN and user-search filter for group lookup, and a **group → role map** (e.g. `FMS-Admins → admin`, `FMS-Analysts → analyst`) with a default role for everyone else. Use **Test Directory Connection** to confirm reachability before enabling.
+
+When enabled: a user signs in with their AD credentials, FMS verifies them against the directory, maps their groups to an FMS role, and creates their account automatically on first login — no directory password is ever stored in FMS. **Built-in local accounts keep working**, so an unreachable or misconfigured directory can never lock you out; the local admin can always sign in.
+
+### 8.11 Roles / Permissions / API Integrations
 Shown locked ("Coming soon") — the built-in three-role model is active today; granular permissions and integration management are planned.
 
 ---
