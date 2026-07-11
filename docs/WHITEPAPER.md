@@ -1,13 +1,13 @@
-# FMS: Deterministic, Explainable Transaction Monitoring for Under-Resourced Financial Institutions
+# FMS: A Privacy-Preserving, Deterministic RegTech Platform for AML/CFT Compliance at Under-Resourced U.S. Financial Institutions
 
 **Tochukwu Iloani**
-*July 2026 · Version 1.0*
+*July 2026 · Version 1.1*
 
 ---
 
 ## Abstract
 
-Community banks, credit unions, money services businesses, and fintech startups carry the same Bank Secrecy Act (BSA) obligations as the largest financial institutions — suspicious-activity monitoring, currency-transaction reporting, and sanctions screening — while rarely having access to the enterprise compliance platforms built to meet them. This paper presents **FMS (Fraud Monitoring System)**, an open-source transaction-monitoring platform designed for that underserved segment. FMS combines a fully deterministic, explainable detection engine with OFAC sanctions screening, FinCEN-aligned CTR/SAR identification and filing preparation, role-based case management, and a complete audit trail — deployable on commodity hardware with a one-command container setup. We describe the system's architecture, detection methodology, and security model; we argue that determinism and explainability are not compromises but *requirements* for regulated compliance tooling; and we state plainly what the system does not yet do. FMS is positioned as decision support for a human compliance officer, never as their replacement.
+Anti-Money Laundering (AML) and Countering the Financing of Terrorism (CFT) compliance sits at the intersection of national security, cybersecurity, and financial-infrastructure resilience. Yet community banks, credit unions, money services businesses, and fintech startups carry the same Bank Secrecy Act (BSA) obligations as the largest institutions — suspicious-activity monitoring, currency-transaction reporting, and sanctions screening — while rarely affording the enterprise platforms built to meet them, and while legacy compliance tools often require risky, direct connectivity into core banking databases. This paper presents **FMS (Fraud Monitoring System)**, an open-source, privacy-preserving regulatory-technology (RegTech) platform for that underserved segment. FMS pairs a fully deterministic, explainable detection engine with OFAC sanctions screening and FinCEN-aligned CTR/SAR identification and filing preparation, and it ingests transactions two ways: a secure, webhook/API push model requiring **no database access** — institutions send transaction events and receive a risk verdict synchronously — or a read-only database poll for on-premises deployments. The push model applies **zero-trust principles**: no implicit trust of, or inbound connectivity into, an institution's database; authenticated ingestion; and HMAC-signed result exchange — materially reducing the attack surface of traditional AML integrations. We describe the architecture, detection methodology, and security model; argue that determinism and explainability are *requirements*, not compromises, for examinable compliance tooling; and state plainly what the system does not yet do. FMS is decision support for a human compliance officer, never a replacement.
 
 ---
 
@@ -23,6 +23,8 @@ Large banks meet these duties with commercial AML platforms whose licensing, int
 
 FMS is an attempt to close part of that gap with open-source software: monitoring that is *credible* — aligned with the actual regulatory framework, explainable to an examiner, honest about its limits — while being deployable by a single technical operator.
 
+The problem is one of national importance, not merely commercial convenience. Under-monitored institutions are precisely the channels illicit finance seeks out; strengthening their detection capability supports the U.S. Department of the Treasury's stated modernization of the AML/CFT regime toward effective, risk-based, technology-driven compliance, and contributes to the security and resilience of the national payment system. Lowering the cost and integration risk of credible monitoring is therefore a matter of financial-infrastructure resilience and, by extension, economic and national security.
+
 ## 2. Design principles
 
 Three principles drove every architectural decision.
@@ -33,12 +35,19 @@ Three principles drove every architectural decision.
 
 **2.3 Data stays home by default.** In its default configuration FMS makes no external calls with transaction data. The optional AI feature — a natural-language case summary — is off by default, never participates in detection, and can be pointed at a self-hosted model so that even prose generation never leaves the institution's infrastructure.
 
+**2.4 Minimize the integration attack surface (zero-trust ingestion).** Traditional AML tools require standing, privileged connectivity into a core banking database — a persistent, high-value attack surface and a common objection from security-conscious U.S. fintechs. FMS's primary integration inverts this: the institution *pushes* transaction events to an authenticated endpoint and receives a verdict, so FMS holds no database credentials and opens no inbound path to the core. This reflects zero-trust principles — nothing is trusted by location or network position; every exchange is authenticated and integrity-protected (HMAC-signed) — rather than a formally certified zero-trust framework. A read-only database poll remains available for on-premises institutions that prefer it.
+
 ## 3. System architecture
 
-FMS consists of four cooperating components:
+FMS supports two ingestion models over a common detection core:
 
 ```
-Core banking DB ──(read-only adapter: MySQL / SQL Server)──▶ Poller
+        ┌─ API push (primary): institution POSTs events ─┐   (no DB access)
+        │      X-API-Key auth → synchronous verdict       │
+Institution ───────────────────────────────────────────► Ingestion
+        │                                                 │
+        └─ Read-only DB poll (on-prem): MySQL / SQL       ┘
+           Server / PostgreSQL / Oracle
                                                                │
                                               Deterministic detection engine
                                               + OFAC sanctions screening
@@ -51,13 +60,15 @@ Core banking DB ──(read-only adapter: MySQL / SQL Server)──▶ Poller
                                                         └──▶ Web dashboard (Next.js)
 ```
 
-**Ingestion.** A poller reads new transactions from the institution's database through a read-only adapter (MySQL and SQL Server are implemented; the adapter interface is deliberately small). A column-mapping configuration adapts FMS to arbitrary schemas without code changes. FMS never writes to the source database. Processing is *never-miss by construction*: the ingestion checkpoint advances only after a case is durably committed, failed analyses are retried rather than skipped, and a uniqueness constraint on the source transaction prevents duplicate cases on crash recovery.
+**Ingestion.** FMS accepts transactions two ways over the same detection core. In **API-push mode** (the primary, privacy-preserving model), the institution POSTs each transaction to an API-key-authenticated endpoint and receives the risk verdict in the same response; FMS stores no database credentials and the institution's core has no inbound exposure. Behavioral history for these accounts is built from FMS's own append-only ingested-transaction store, so the full engine operates with zero database access. In **DB-poll mode** (for on-premises institutions that prefer it), a poller reads new transactions read-only through a small adapter interface — MySQL, SQL Server, PostgreSQL, and Oracle are implemented — with a column-mapping configuration that adapts to arbitrary schemas without code changes; FMS never writes to the source database. In both modes processing is *idempotent and never-miss by construction*: results are committed durably before any checkpoint advances, failed analyses are retried rather than skipped, and a uniqueness constraint on the source transaction id prevents duplicate cases on replay or crash recovery.
 
 **Detection engine.** Each transaction is analyzed against the account's own recent history (default 90 days). The engine computes a 0–100 risk score as a sum of named components (§4), assesses CTR and SAR obligations independently of the fraud verdict, and screens the counterparty against the OFAC SDN list (§5). Analysis is resilient to component failure: the optional AI summary can fail or be disabled with no effect on detection.
 
 **Application store.** Cases, user accounts, and the audit log live in a server database (SQL Server or PostgreSQL-compatible via SQLAlchemy; SQLite for development), separate from the banking database.
 
-**Interface.** A web dashboard provides the operational surface: a real-time alert queue, full transaction log, per-customer rollups, case workflow, a transparent view of the live rule configuration, analytics with honestly-computed KPIs, filing reports with deadline tracking, the audit trail, and administration. A WebSocket feed pushes new alerts to connected analysts; email alerting is available for off-dashboard notification.
+**Interface.** A web dashboard provides the operational surface: a real-time alert queue, full transaction log, per-customer rollups, case workflow, a transparent view of the live rule configuration, analytics with honestly-computed KPIs, filing reports with deadline tracking, per-user audit investigation, and administration. A WebSocket feed pushes new alerts to connected analysts; email alerting is available for off-dashboard notification.
+
+**Result delivery (outbound).** Complementing push ingestion, FMS can post results *back* to the institution's endpoint — a `case.flagged` event on detection and a `case.disposition` event when a human confirms, dismisses, or escalates — each HMAC-SHA256 signed so the receiver can verify authenticity and integrity. This closes the loop for the zero-trust model: a partner integrates entirely over authenticated, signed HTTPS in both directions, with no shared database and no standing network path into either system.
 
 ## 4. Detection methodology
 
@@ -82,7 +93,7 @@ Flagged cases receive a human-meaningful typology — *multi-source smurfing*, *
 
 ## 5. Sanctions screening
 
-Every counterparty name is screened against the OFAC SDN list (primary names plus aliases; ~40,000 entries), refreshed from the US Treasury's published files by an operator-run script. Matching is normalized (case, punctuation, corporate suffixes, token order) and fuzzy (token-overlap and sequence similarity) with a conservative default threshold of 0.90 to control false positives. A trigram candidate index reduces per-transaction screening cost from seconds to single-digit milliseconds against the full list, making per-transaction screening viable on modest hardware.
+Every counterparty name is screened against the OFAC SDN list (primary names plus aliases; ~40,000 entries), refreshed from the US Treasury's published files automatically on a schedule (default daily) with a manual operator script as a fallback. In API-push mode the account holder name may also be supplied and is screened alongside the counterparty. Matching is normalized (case, punctuation, corporate suffixes, token order) and fuzzy (token-overlap and sequence similarity) with a conservative default threshold of 0.90 to control false positives. A trigram candidate index reduces per-transaction screening cost from seconds to single-digit milliseconds against the full list, making per-transaction screening viable on modest hardware.
 
 A confirmed-format SDN match **overrides** the behavioral score entirely: the case is forced to the highest severity with an explicit block-or-reject instruction, reflecting that OFAC obligations are absolute rather than risk-weighted. The match evidence (matched entry, sanctions program, similarity score) is presented for human adjudication, and the interface reminds the analyst that name screening can produce false positives. An optional politically-exposed-persons list is supported with a distinct, non-blocking "enhanced due diligence" treatment — because PEP status is a risk factor, not a prohibition.
 
@@ -117,9 +128,10 @@ Credibility in compliance tooling requires stating what a system does *not* do.
 1. **No machine-learning detection.** FMS will not catch novel patterns outside its rule set. This is the accepted cost of full explainability at this stage; the rules cover the well-documented core typologies.
 2. **No model validation against labeled outcomes.** Thresholds are documented, reasoned heuristics — not yet tuned against an institution's confirmed-fraud history. The methodology document defines the tuning procedure an adopting institution should run; FMS records the officer decisions (confirm/dismiss) that make future above/below-the-line analysis possible.
 3. **Name-only sanctions screening.** Screening does not yet incorporate dates of birth, addresses, identification numbers, or phonetic matching, and screens transaction counterparties rather than the full customer base.
-4. **Detection, not interdiction.** FMS observes transactions after they post (polling latency: seconds). It supports rapid containment — alert, hold, freeze — but does not sit inline in the payment path and cannot reject a payment pre-settlement. Push-based ingestion, which narrows this window further, is on the roadmap.
-5. **Single-node scope.** The current deployment model is one backend node; login throttling and WebSocket state are in-process. Multi-node deployment requires shared state and is future work.
-6. **Operational security is the deployer's.** HTTPS termination, secrets management, database encryption at rest, and MFA are deployment-environment responsibilities documented, but not provided, by the project.
+4. **Detection and containment, not inline interdiction.** In API-push mode a synchronous verdict is returned as the transaction is submitted, so the institution *may* choose to act pre-settlement using that verdict; FMS itself, however, does not sit inline in the payment rail and does not reject payments on the institution's behalf. In DB-poll mode it observes transactions after they post (seconds of latency). In both cases the design supports rapid human containment — alert, hold, freeze — rather than automated blocking.
+5. **"Zero-trust" is an architectural posture, not a certification.** The push model applies zero-trust *principles* (no implicit database trust, authenticated ingestion, HMAC-signed exchange, least-privilege read-only DB access when polling). It has not been assessed against a formal zero-trust maturity framework (e.g., NIST SP 800-207) or independently audited.
+6. **Single-node scope.** The current deployment model is one backend node; login throttling and WebSocket state are in-process. Multi-node deployment requires shared state and is future work.
+7. **Operational security is the deployer's.** HTTPS termination, secrets management, database encryption at rest, and MFA are deployment-environment responsibilities documented, but not provided, by the project.
 
 ## 10. Related context
 
