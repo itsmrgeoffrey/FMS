@@ -137,11 +137,11 @@ Credibility in compliance tooling requires stating what a system does *not* do.
 
 ## 10. Related context
 
-Commercial AML suites (e.g., NICE Actimize, Oracle FCCM, Verafin) offer broader typology coverage, learning-based detection, and vendor support at costs generally out of reach for the institutions FMS targets. Open-source AML tooling remains sparse and largely component-level (matching libraries, rule engines) rather than deployable end-to-end systems with case management and filing preparation. FMS's contribution is the *integration*: a coherent, standards-aligned, operable whole — engine, screening, workflow, audit, reporting — under an MIT license.
+Commercial AML suites (e.g., NICE Actimize, Oracle FCCM, Verafin) offer broader typology coverage, learning-based detection, and vendor support at costs generally out of reach for the institutions FMS targets. Open-source AML tooling remains sparse and largely component-level (matching libraries, rule engines) rather than deployable end-to-end systems with case management and filing preparation. FMS's contribution is the *integration*: a coherent, standards-aligned, operable whole — engine, screening, workflow, audit, reporting — under the Apache-2.0 license.
 
 ## 11. Conclusion
 
-Financial-crime monitoring should not be a luxury good. The regulatory framework already tells us what must be watched for; the barrier for small institutions has been the cost of credible software, not the mystery of the requirements. FMS demonstrates that a deterministic, explainable, auditable monitoring platform — one a compliance officer can defend line-by-line to an examiner — can be built and given away. The system is open source under the MIT license, self-hostable in one command, and designed from its first line to keep a human being, identified and accountable, at the center of every decision that matters.
+Financial-crime monitoring should not be a luxury good. The regulatory framework already tells us what must be watched for; the barrier for small institutions has been the cost of credible software, not the mystery of the requirements. FMS demonstrates that a deterministic, explainable, auditable monitoring platform — one a compliance officer can defend line-by-line to an examiner — can be built and given away. The system is open source under the Apache License 2.0, self-hostable in one command, and designed from its first line to keep a human being, identified and accountable, at the center of every decision that matters.
 
 ---
 

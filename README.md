@@ -138,4 +138,4 @@ Every threshold, scoring rule, and screening parameter is documented — with it
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE). Free to use, modify, and deploy (including commercially); provided as-is with no warranty; includes an explicit patent grant.
