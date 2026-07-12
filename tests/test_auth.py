@@ -12,15 +12,15 @@ def _user(role="admin", uid="u1", username="alice"):
 # ─── Password hashing ────────────────────────────────────────────────────────
 
 def test_hash_and_verify_password():
-    h = auth.hash_password("supersecret1")
-    assert h != "supersecret1"                 # never stored in plain text
+    h = auth.hash_password("fixture-pass-A1")
+    assert h != "fixture-pass-A1"                 # never stored in plain text
     assert h.startswith("pbkdf2_sha256$")
-    assert auth.verify_password("supersecret1", h)
+    assert auth.verify_password("fixture-pass-A1", h)
 
 
 def test_verify_rejects_wrong_password():
-    h = auth.hash_password("supersecret1")
-    assert not auth.verify_password("supersecret2", h)
+    h = auth.hash_password("fixture-pass-A1")
+    assert not auth.verify_password("fixture-pass-B2", h)
     assert not auth.verify_password("", h)
 
 
