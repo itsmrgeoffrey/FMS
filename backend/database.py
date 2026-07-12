@@ -8,8 +8,9 @@ from sqlalchemy.orm import DeclarativeBase
 
 log = logging.getLogger(__name__)
 
-# Load .env before reading the DB URL, independent of import order.
-load_dotenv(Path(__file__).parent.parent / ".env")
+# Load the selected environment file before reading the DB URL, independent of
+# import order (FMS_ENV_FILE lets prod/test environments stay isolated).
+load_dotenv(os.getenv("FMS_ENV_FILE", "").strip() or str(Path(__file__).parent.parent / ".env"))
 
 # The FMS application store. Defaults to SQLite (portable, used by tests); set
 # FMS_APP_DB_URL to a server database URL (e.g. SQL Server via mssql+aioodbc,

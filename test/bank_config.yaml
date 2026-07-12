@@ -1,0 +1,14 @@
+# Demo/test ingestion config — API-push mode, no bank database.
+# Institutions POST transactions to /ingest/transactions and receive the verdict.
+database:
+  type: mysql          # unused in API mode; present for schema completeness
+tables: {}
+monitoring:
+  mode: api            # "api" (push, no DB) or "poll" (read a bank DB)
+  poll_interval_seconds: 30
+  history_days: 90
+institution:
+  name: Demo Community Bank
+  primary_regulator: FDIC
+directory:
+  enabled: false

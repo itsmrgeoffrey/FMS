@@ -6,11 +6,16 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent / ".env")
-
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parent.parent
+
+# Environment selection: point FMS_ENV_FILE at a folder's env (e.g. prod/prod.env
+# or test/demo.env) and FMS_BANK_CONFIG at that folder's bank_config.yaml to run
+# a specific environment. Both default to the project root, so existing setups
+# are unaffected.
+ENV_FILE = os.getenv("FMS_ENV_FILE", "").strip() or str(ROOT / ".env")
+load_dotenv(ENV_FILE)
 
 APP_VERSION = "0.1.0"
 ENVIRONMENT = os.getenv("FMS_ENV", "development")
@@ -80,7 +85,7 @@ _DEFAULT_BANK_CONFIG: dict = {
 
 
 def load_bank_config() -> dict:
-    config_path = ROOT / "bank_config.yaml"
+    config_path = Path(os.getenv("FMS_BANK_CONFIG", "").strip() or (ROOT / "bank_config.yaml"))
     if config_path.exists():
         with open(config_path, encoding="utf-8") as f:
             return yaml.safe_load(f) or dict(_DEFAULT_BANK_CONFIG)
