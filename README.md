@@ -50,6 +50,30 @@ Core banking DB ──(read-only adapter: MySQL / MSSQL)──▶ Poller
 
 FMS only ever **reads** from your banking database. Its own case data lives in a separate SQLite store.
 
+## Try it in 2 minutes (demo mode)
+
+Demo mode is fully self-contained — SQLite app store, API-push ingestion, **no bank database and no real credentials anywhere**:
+
+```bash
+pip install -r requirements.txt
+FMS_APP_DB_URL= FMS_DB_PATH=fms_demo.db python scripts/seed_demo.py
+FMS_APP_DB_URL= FMS_DB_PATH=fms_demo.db python -m uvicorn backend.main:app --port 8002
+# in a second terminal:
+cd frontend && npm install && npm run dev    # open http://localhost:3000
+```
+
+Sign in with the seeded demo users (each shows a different permission level):
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@fms.demo` | `DemoAdmin!2026` |
+| Analyst | `analyst@fms.demo` | `DemoAnalyst!2026` |
+| Viewer | `viewer@fms.demo` | `DemoViewer!2026` |
+
+The seed includes sample cases across the detection typologies (structuring, smurfing, invoice fraud, account takeover, an OFAC match, plus confirmed/dismissed outcomes) so every dashboard, report, and KPI has content.
+
+> **Demo vs. production:** these credentials exist **only** in a database you seed yourself locally — they are not baked into the application and cannot log in to any real deployment. For production, point `FMS_APP_DB_URL` at your server database, create your own `bank_config.yaml` (never committed), keep `FMS_ALLOW_SIGNUP=false` with a `FMS_SETUP_TOKEN` for first-admin bootstrap, and never run `seed_demo.py` against it (the script refuses non-SQLite databases).
+
 ## Quickstart (Docker — recommended)
 
 **Requirements:** Docker, and read access to a MySQL or SQL Server transaction database.

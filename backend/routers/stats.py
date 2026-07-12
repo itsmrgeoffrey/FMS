@@ -72,9 +72,14 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
 
     # Daily activity, last N days (flagged vs clean), zero-filled.
     cutoff = datetime.combine(date.today() - timedelta(days=ACTIVITY_DAYS - 1), datetime.min.time())
-    # cast-to-Date is portable (SQL Server + SQLite); normalize the key to an
-    # ISO date string since drivers return either a date object or a string.
-    day = cast(FraudCase.created_at, Date)
+    # Day bucketing is dialect-specific: SQLite's CAST(.. AS DATE) yields an
+    # integer (numeric affinity), so use date() there; server DBs use a real
+    # CAST. The key is normalized to an ISO date string either way.
+    from backend.database import engine
+    if engine.dialect.name == "sqlite":
+        day = func.date(FraudCase.created_at)
+    else:
+        day = cast(FraudCase.created_at, Date)
     q = await db.execute(
         select(
             day,

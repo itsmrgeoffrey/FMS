@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 import yaml
@@ -6,6 +7,8 @@ from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
+
+log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parent.parent
 
@@ -65,14 +68,27 @@ if not settings.auth_secret:
         pass  # in-memory secret still works for this process
 
 
+# Safe default when no config file is present: API-push mode with no bank
+# database, so a fresh clone (or CI, or an operator who hasn't written a config
+# yet) boots cleanly and can be configured from Administration. bank_config.yaml
+# is git-ignored because it holds credentials, so it is absent on fresh checkouts.
+_DEFAULT_BANK_CONFIG: dict = {
+    "database": {"type": "mysql"},
+    "tables": {},
+    "monitoring": {"mode": "api", "poll_interval_seconds": 30, "history_days": 90},
+}
+
+
 def load_bank_config() -> dict:
     config_path = ROOT / "bank_config.yaml"
-    if not config_path.exists():
-        raise FileNotFoundError(
-            "bank_config.yaml not found. Copy bank_config.example.yaml and fill it in."
-        )
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or dict(_DEFAULT_BANK_CONFIG)
+    log.warning(
+        "bank_config.yaml not found — starting in API-push mode with no bank database. "
+        "Configure ingestion/database under Administration, or copy bank_config.example.yaml."
+    )
+    return dict(_DEFAULT_BANK_CONFIG)
 
 
 bank_config: dict = load_bank_config()
