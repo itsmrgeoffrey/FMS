@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings as app_settings
 from backend.database import init_db
-from backend.routers import cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest
+from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest
 from backend.routers import settings as settings_routes
 from backend.services import poller, sanctions
 
@@ -77,3 +77,4 @@ app.include_router(auth_routes.router)
 app.include_router(audit.router)
 app.include_router(insights.router)
 app.include_router(ingest.router)
+app.include_router(approvals.router)

@@ -18,7 +18,7 @@ from backend.routers import audit
 from backend.schemas import (
     ForgotPasswordRequest, LoginRequest, SignupRequest, TokenResponse, UserOut,
 )
-from backend.services import emailer, ldap_auth
+from backend.services import dual_control, emailer, ldap_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 log = logging.getLogger(__name__)
@@ -193,12 +193,155 @@ async def change_password(
     return {"changed": True}
 
 
-# ─── Admin user management (the password-recovery path for a self-hosted tool) ─
+# ─── Admin user management ────────────────────────────────────────────────────
+# Sensitive changes go through dual control (maker-checker): with two or more
+# active admins, the requesting admin's change is queued and a *different*
+# admin must approve it. See backend/services/dual_control.py.
 
 @router.get("/users", response_model=list[UserOut])
 async def list_users(db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)):
     users = (await db.execute(select(User).order_by(User.created_at))).scalars().all()
     return [UserOut.model_validate(u) for u in users]
+
+
+async def _get_target(db: AsyncSession, user_id: str) -> User:
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    return target
+
+
+async def _guard_not_last_admin(db: AsyncSession, target: User, change: str) -> None:
+    """Block changes that would leave the system with no active admin."""
+    if target.role == "admin" and target.is_active:
+        others = (await db.execute(
+            select(func.count()).select_from(User).where(
+                User.role == "admin", User.is_active == True, User.id != target.id)  # noqa: E712
+        )).scalar_one()
+        if others == 0:
+            raise HTTPException(status_code=400, detail=f"Cannot {change} the last active admin")
+
+
+async def _issue_temp_password(db: AsyncSession, target: User) -> tuple[str, bool]:
+    """Set a fresh temporary password; email it when possible. Returns (temp, emailed)."""
+    temp_password = secrets.token_urlsafe(9)
+    target.password_hash = hash_password(temp_password)
+    await db.commit()
+    emailed = False
+    if target.email and emailer.is_configured():
+        emailed = emailer.send_password_email(
+            target.email, target.full_name or target.username, temp_password, by_admin=True
+        )
+    return temp_password, emailed
+
+
+# ── Executors: apply the change, either immediately (single-admin mode) or at
+#    approval time by a second admin. They re-validate state at execution time.
+
+@dual_control.register("USER_CREATE")
+async def _exec_create_user(db: AsyncSession, payload: dict, actor: str, request: Request | None) -> dict:
+    email = _normalize_email(payload["email"])
+    role = payload["role"]
+    exists = (await db.execute(
+        select(User).where((User.email == email) | (User.username == email))
+    )).scalar_one_or_none()
+    if exists:
+        raise HTTPException(status_code=409, detail="An account with that email already exists")
+
+    user = User(
+        username=email,
+        email=email,
+        full_name=(payload.get("full_name") or "").strip() or None,
+        password_hash=hash_password(secrets.token_urlsafe(32)),  # replaced just below
+        role=role,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    temp_password, emailed = await _issue_temp_password(db, user)
+
+    await audit.record(actor, "USER_CREATED", target=user.username,
+                       detail=f"role={role}; {'temp password emailed' if emailed else 'temp password shown on-screen'}",
+                       request=request)
+    return {
+        "username": user.username, "email": user.email, "role": user.role, "emailed": emailed,
+        # Only surfaced when we couldn't email it.
+        "temp_password": None if emailed else temp_password,
+    }
+
+
+@dual_control.register("USER_SET_ROLE")
+async def _exec_set_role(db: AsyncSession, payload: dict, actor: str, request: Request | None) -> dict:
+    target = await _get_target(db, payload["user_id"])
+    role = payload["role"]
+    if role != "admin":
+        await _guard_not_last_admin(db, target, "remove the admin role of")
+    target.role = role
+    await db.commit()
+    await audit.record(actor, "USER_ROLE_CHANGED", target=target.username, detail=role, request=request)
+    return {"username": target.username, "role": target.role}
+
+
+@dual_control.register("USER_TOGGLE_ACTIVE")
+async def _exec_toggle_active(db: AsyncSession, payload: dict, actor: str, request: Request | None) -> dict:
+    target = await _get_target(db, payload["user_id"])
+    if target.is_active:
+        await _guard_not_last_admin(db, target, "disable")
+    target.is_active = not target.is_active
+    await db.commit()
+    action = "USER_ENABLED" if target.is_active else "USER_DISABLED"
+    await audit.record(actor, action, target=target.username, request=request)
+    return {"username": target.username, "is_active": target.is_active}
+
+
+@dual_control.register("USER_RESET_PASSWORD")
+async def _exec_reset_password(db: AsyncSession, payload: dict, actor: str, request: Request | None) -> dict:
+    target = await _get_target(db, payload["user_id"])
+    temp_password, emailed = await _issue_temp_password(db, target)
+    await audit.record(actor, "USER_PASSWORD_RESET", target=target.username,
+                       detail="emailed" if emailed else "shown on-screen", request=request)
+    return {
+        "username": target.username, "email": target.email, "emailed": emailed,
+        "temp_password": None if emailed else temp_password,
+    }
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+class CreateUserRequest(BaseModel):
+    email: str
+    full_name: str | None = None
+    role: str = "analyst"
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+async def create_user(
+    body: CreateUserRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Admin-created account (the only way to add users while signup is off).
+    A temporary password is emailed to the user, or shown once if SMTP isn't set."""
+    email = _normalize_email(body.email)
+    if not _valid_email(email):
+        raise HTTPException(status_code=400, detail="A valid email address is required")
+    role = body.role.strip().lower()
+    if role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(sorted(VALID_ROLES))}")
+    exists = (await db.execute(
+        select(User).where((User.email == email) | (User.username == email))
+    )).scalar_one_or_none()
+    if exists:
+        raise HTTPException(status_code=409, detail="An account with that email already exists")
+
+    return await dual_control.submit_or_execute(
+        db, request, admin,
+        action="USER_CREATE",
+        payload={"email": email, "full_name": body.full_name, "role": role},
+        summary=f"Create {role} account for {email}",
+        target=email,
+    )
 
 
 @router.post("/users/{user_id}/reset-password")
@@ -208,34 +351,19 @@ async def reset_password(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    temp_password = secrets.token_urlsafe(9)
-    target.password_hash = hash_password(temp_password)
-    await db.commit()
-
-    # Prefer emailing the temp password. Fall back to returning it on-screen when
-    # the user has no email on file or SMTP isn't configured, so the admin is never
-    # stuck (e.g. local/demo setups).
-    emailed = False
-    if target.email and emailer.is_configured():
-        emailed = emailer.send_password_email(
-            target.email, target.full_name or target.username, temp_password, by_admin=True
+    target = await _get_target(db, user_id)
+    # Resetting an ADMIN's password is an account-takeover vector (the temp
+    # password may be shown on-screen), so it requires a second admin's approval.
+    # Non-admin resets stay immediate: they're the everyday recovery path.
+    if target.role == "admin":
+        return await dual_control.submit_or_execute(
+            db, request, admin,
+            action="USER_RESET_PASSWORD",
+            payload={"user_id": user_id},
+            summary=f"Reset password of admin {target.username}",
+            target=target.username,
         )
-
-    await audit.record(
-        admin.username, "USER_PASSWORD_RESET", target=target.username,
-        detail="emailed" if emailed else "shown on-screen", request=request,
-    )
-    return {
-        "username": target.username,
-        "email": target.email,
-        "emailed": emailed,
-        # Only surfaced when we couldn't email it.
-        "temp_password": None if emailed else temp_password,
-    }
+    return await _exec_reset_password(db, {"user_id": user_id}, admin.username, request)
 
 
 @router.post("/forgot-password")
@@ -275,15 +403,17 @@ async def set_role(
     role = body.role.strip().lower()
     if role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(sorted(VALID_ROLES))}")
-    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
-    if target.id == admin.id and role != "admin":
-        raise HTTPException(status_code=400, detail="You cannot remove your own admin role")
-    target.role = role
-    await db.commit()
-    await audit.record(admin.username, "USER_ROLE_CHANGED", target=target.username, detail=role, request=request)
-    return {"username": target.username, "role": target.role}
+    target = await _get_target(db, user_id)
+    if role != "admin":
+        # Fast feedback at request time; the executor re-checks at approval time.
+        await _guard_not_last_admin(db, target, "remove the admin role of")
+    return await dual_control.submit_or_execute(
+        db, request, admin,
+        action="USER_SET_ROLE",
+        payload={"user_id": user_id, "role": role},
+        summary=f"Change role of {target.username} from {target.role} to {role}",
+        target=target.username,
+    )
 
 
 @router.post("/users/{user_id}/toggle-active")
@@ -293,13 +423,13 @@ async def toggle_active(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
-    if target.id == admin.id:
-        raise HTTPException(status_code=400, detail="You cannot disable your own account")
-    target.is_active = not target.is_active
-    await db.commit()
-    action = "USER_ENABLED" if target.is_active else "USER_DISABLED"
-    await audit.record(admin.username, action, target=target.username, request=request)
-    return {"username": target.username, "is_active": target.is_active}
+    target = await _get_target(db, user_id)
+    if target.is_active:
+        await _guard_not_last_admin(db, target, "disable")
+    return await dual_control.submit_or_execute(
+        db, request, admin,
+        action="USER_TOGGLE_ACTIVE",
+        payload={"user_id": user_id},
+        summary=f"{'Disable' if target.is_active else 'Enable'} account {target.username}",
+        target=target.username,
+    )

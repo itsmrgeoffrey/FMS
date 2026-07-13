@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { api, auth } from "@/lib/api";
+import type { Approval, ApprovalsPage } from "@/lib/api";
 import type { AuthUser, AuditEntry } from "@/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -121,27 +122,67 @@ function MyAccountSection() {
 
 function UsersSection() {
   const [users, setUsers] = useState<AuthUser[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalsPage | null>(null);
   const [temp, setTemp] = useState<{ username: string; email: string | null; emailed: boolean; temp_password: string | null } | null>(null);
+  const [pendingMsg, setPendingMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Create-user form
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState("analyst");
+  const [creating, setCreating] = useState(false);
   const me = auth.user();
 
   function load() {
     api.listUsers().then(setUsers).catch((e) => setError(String(e)));
+    api.listApprovals().then(setApprovals).catch(() => {});
   }
   useEffect(load, []);
 
+  /** Dual control: sensitive actions may come back queued instead of applied. */
+  function handled<T extends object>(res: T | { pending: true; message: string }): res is { pending: true; message: string } {
+    if ("pending" in res && res.pending) {
+      setPendingMsg(res.message);
+      load();
+      return true;
+    }
+    return false;
+  }
+
+  async function createUser() {
+    setError(null);
+    setPendingMsg(null);
+    setTemp(null);
+    setCreating(true);
+    try {
+      const res = await api.createUser(newEmail.trim(), newName.trim(), newRole);
+      if (!handled(res)) {
+        setTemp(res as { username: string; email: string | null; emailed: boolean; temp_password: string | null });
+        setNewEmail(""); setNewName(""); setNewRole("analyst");
+      }
+      load();
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*API error \d+:\s*/, ""));
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function reset(u: AuthUser) {
     if (!window.confirm(`Reset password for "${u.username}"? Their current password stops working immediately.`)) return;
+    setPendingMsg(null);
     try {
-      setTemp(await api.resetUserPassword(u.id));
+      const res = await api.resetUserPassword(u.id);
+      if (!handled(res)) setTemp(res as { username: string; email: string | null; emailed: boolean; temp_password: string | null });
     } catch (e) {
       setError(String(e));
     }
   }
 
   async function toggle(u: AuthUser) {
+    setPendingMsg(null);
     try {
-      await api.toggleUserActive(u.id);
+      handled(await api.toggleUserActive(u.id));
       load();
     } catch (e) {
       setError(String(e));
@@ -149,8 +190,9 @@ function UsersSection() {
   }
 
   async function changeRole(u: AuthUser, role: string) {
+    setPendingMsg(null);
     try {
-      await api.setUserRole(u.id, role);
+      handled(await api.setUserRole(u.id, role));
       load();
     } catch (e) {
       setError(String(e));
@@ -158,11 +200,15 @@ function UsersSection() {
   }
 
   return (
+    <>
+    {approvals && (
+      <ApprovalsSection approvals={approvals} onChanged={load} onTemp={setTemp} />
+    )}
     <section className="bg-white rounded-lg border border-gray-200 p-5">
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-gray-700">Users</h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Assign roles, reset passwords, and enable/disable accounts.
+          Create accounts, assign roles, reset passwords, and enable/disable users.
         </p>
         <p className="text-xs text-gray-400 mt-1">
           <span className="font-medium text-gray-500">Admin</span> — full access ·{" "}
@@ -171,6 +217,42 @@ function UsersSection() {
         </p>
       </div>
 
+      {/* Create user */}
+      <div className="mb-5 p-4 rounded-lg bg-gray-50 border border-gray-100">
+        <p className="text-xs font-semibold text-gray-600 mb-3">Add a user</p>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          <Field label="Email" value={newEmail} onChange={setNewEmail} placeholder="name@yourbank.com" />
+          <Field label="Full name (optional)" value={newName} onChange={setNewName} />
+          <div>
+            <label className="block text-xs text-gray-500 font-medium mb-1">Role</label>
+            <select
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 capitalize"
+            >
+              <option value="admin">Admin</option>
+              <option value="analyst">Analyst</option>
+              <option value="viewer">Viewer</option>
+            </select>
+          </div>
+          <button
+            onClick={createUser}
+            disabled={creating || !newEmail.trim()}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
+          >
+            {creating ? "Creating..." : "Create user"}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          A temporary password is emailed to the user (or shown once here if email isn&apos;t configured).
+        </p>
+      </div>
+
+      {pendingMsg && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+          ⏳ {pendingMsg}
+        </div>
+      )}
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
       {temp && (
@@ -244,6 +326,138 @@ function UsersSection() {
           ))}
         </tbody>
       </table>
+    </section>
+    </>
+  );
+}
+
+function ApprovalsSection({
+  approvals, onChanged, onTemp,
+}: {
+  approvals: ApprovalsPage;
+  onChanged: () => void;
+  onTemp: (t: { username: string; email: string | null; emailed: boolean; temp_password: string | null }) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function decide(a: Approval, action: "approve" | "reject" | "cancel") {
+    setError(null);
+    setBusy(a.id);
+    try {
+      if (action === "approve") {
+        const res = await api.approveChange(a.id);
+        // A user-create/password-reset approval may surface a one-time temp password.
+        const r = res.result as { username?: string; email?: string | null; emailed?: boolean; temp_password?: string | null };
+        if (r && r.temp_password) {
+          onTemp({ username: r.username ?? "", email: r.email ?? null, emailed: !!r.emailed, temp_password: r.temp_password });
+        }
+      } else if (action === "reject") {
+        const note = window.prompt("Reason for rejecting (optional):") ?? undefined;
+        await api.rejectChange(a.id, note);
+      } else {
+        await api.cancelChange(a.id);
+      }
+      onChanged();
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*API error \d+:\s*/, ""));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
+      <div className="mb-3 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-700">Pending Approvals (dual control)</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Sensitive changes need a second admin&apos;s sign-off — the requester can never approve their own change.
+          </p>
+        </div>
+        {approvals.dual_control_active ? (
+          <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700 border border-green-200">
+            ✓ Dual control active ({approvals.active_admins} admins)
+          </span>
+        ) : (
+          <span className="text-xs font-medium px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">
+            Single-admin mode — add a second admin to activate dual control
+          </span>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+
+      {approvals.pending.length === 0 ? (
+        <p className="text-sm text-gray-400">No changes waiting for approval.</p>
+      ) : (
+        <ul className="divide-y divide-gray-50">
+          {approvals.pending.map((a) => {
+            const mine = a.requested_by === approvals.me;
+            return (
+              <li key={a.id} className="py-3 flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-sm text-gray-800">{a.summary}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    requested by <span className="font-medium">{mine ? "you" : a.requested_by}</span>{" "}
+                    · {new Date(a.requested_at + "Z").toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
+                  </p>
+                </div>
+                <div className="space-x-2 whitespace-nowrap">
+                  {mine ? (
+                    <button
+                      onClick={() => decide(a, "cancel")}
+                      disabled={busy === a.id}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Cancel my request
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => decide(a, "approve")}
+                        disabled={busy === a.id}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => decide(a, "reject")}
+                        disabled={busy === a.id}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {approvals.recent.length > 0 && (
+        <details className="mt-4">
+          <summary className="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">
+            Recent decisions ({approvals.recent.length})
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {approvals.recent.map((a) => (
+              <li key={a.id} className="text-xs text-gray-500">
+                <span className={
+                  a.status === "approved" ? "text-green-600 font-medium" :
+                  a.status === "rejected" ? "text-red-600 font-medium" : "text-gray-400 font-medium"
+                }>
+                  {a.status}
+                </span>{" "}
+                — {a.summary} <span className="text-gray-400">(by {a.decided_by})</span>
+                {a.decision_note && <span className="text-gray-400 italic"> — “{a.decision_note}”</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
   );
 }
@@ -324,6 +538,11 @@ export default function SettingsPage() {
     setError(null);
     try {
       const res = await api.updateSettings(payload);
+      if ("pending" in res && res.pending) {
+        setNotice(`⏳ ${res.message}`);
+        setSaving(null);
+        return;
+      }
       setNotice(
         res.restart_required
           ? "Saved. Restart the backend to apply database/table changes."

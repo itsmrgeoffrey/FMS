@@ -26,3 +26,6 @@ data/alt.csv
 # The demo/test environment IS committed (no real secrets). Re-include its
 # bank_config.yaml, which the global bank_config.yaml rule above would ignore.
 !test/bank_config.yaml
+
+# Maintainer-only internal architecture notes (kept local, not published)
+docs/CODE_TOUR.md

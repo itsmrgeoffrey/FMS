@@ -19,12 +19,14 @@ from datetime import datetime
 import yaml
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth import require_admin
 from backend.config import APP_VERSION, ENVIRONMENT, ROOT, bank_config, settings
+from backend.database import get_db
 from backend.models import User
 from backend.routers import audit
-from backend.services import poller
+from backend.services import dual_control, poller
 
 log = logging.getLogger(__name__)
 
@@ -256,8 +258,36 @@ async def system_info(user: User = Depends(require_admin)):
     }
 
 
+@dual_control.register("SETTINGS_UPDATE")
+async def _exec_settings_update(db: AsyncSession, payload: dict, actor: str, request: Request | None) -> dict:
+    body = SettingsUpdate(**payload)
+    return await _apply_settings(body, actor, request)
+
+
 @router.put("")
-async def update_settings(body: SettingsUpdate, request: Request, user: User = Depends(require_admin)):
+async def update_settings(
+    body: SettingsUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Configuration changes are dual-controlled: with two or more active admins,
+    a save is queued until a second admin approves it (see dual_control.py)."""
+    sections = [k for k in ("database", "tables", "rules", "monitoring", "institution",
+                            "alerts", "llm", "security", "integrations", "directory")
+                if getattr(body, k) is not None]
+    if not sections:
+        return {"saved": False, "restart_required": False}
+    return await dual_control.submit_or_execute(
+        db, request, user,
+        action="SETTINGS_UPDATE",
+        payload=body.model_dump(exclude_none=True),
+        summary="Update settings: " + ", ".join(sections),
+        target="settings",
+    )
+
+
+async def _apply_settings(body: SettingsUpdate, actor: str, request: Request | None) -> dict:
     restart_required = False
     data = _read_yaml()
 
@@ -373,6 +403,6 @@ async def update_settings(body: SettingsUpdate, request: Request, user: User = D
     detail = ", ".join(sections) or None
     if db_changes:
         detail = f"{detail} [{'; '.join(db_changes)}]"
-    await audit.record(user.username, "SETTINGS_UPDATED", detail=detail, request=request)
-    log.info(f"Settings updated by {user.username} (restart_required={restart_required})")
+    await audit.record(actor, "SETTINGS_UPDATED", detail=detail, request=request)
+    log.info(f"Settings updated by {actor} (restart_required={restart_required})")
     return {"saved": True, "restart_required": restart_required}

@@ -41,6 +41,14 @@ The engine models both independently so a compliance officer sees the right obli
 
 The BSA requires institutions to retain SAR/CTR filings and supporting documentation for **five years** (31 CFR 1010.430, 1020.320(d)). FMS **retains all cases, case actions, and audit-log entries indefinitely and never deletes them automatically** — deleting compliance records is an operator decision that should only be made against your institution's retention policy, and never before the five-year mark. Back up the FMS application database on the same schedule as your other books and records.
 
+## Access control & dual control (maker-checker)
+
+FMS enforces role-based access (**admin** — full access including Administration; **analyst** — view and act on cases; **viewer** — read-only) and audits every sensitive action (logins, failed logins, case actions, password changes and resets, user changes, settings changes) with actor, target, timestamp, and IP.
+
+Sensitive administrative changes are additionally under **dual control**: when the institution has two or more active admins, creating a user, changing a role, enabling/disabling an account, resetting another admin's password, or changing system settings does not take effect until a **second, different admin approves it** (Administration → Users → Pending Approvals). The requester can never approve their own change. With fewer than two active admins, changes apply immediately and the UI says so — institutions should create a second admin promptly; dual control activates automatically the moment they do.
+
+Bootstrap is intentional: the **first account** created becomes the admin (in production this requires the setup token), and public self-signup is disabled after that — all further accounts are created by an admin from Administration → Users, with a temporary password delivered by email (or shown once on-screen when SMTP isn't configured).
+
 ## What FMS does *not* do
 
 - It does not transmit anything to FinCEN or any regulator (no BSA E-Filing integration).

@@ -95,6 +95,25 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
+class PendingApproval(Base):
+    """A sensitive administrative change awaiting a second admin's approval
+    (dual control / maker-checker). The requesting admin is the *maker*; a
+    different admin must approve (*checker*) before the change executes."""
+    __tablename__ = "pending_approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    action: Mapped[str] = mapped_column(String(40), index=True)    # USER_CREATE / USER_SET_ROLE / ...
+    payload: Mapped[str] = mapped_column(Text)                      # JSON args for the executor
+    target: Mapped[str | None] = mapped_column(String(150), nullable=True)   # affected user/resource
+    summary: Mapped[str] = mapped_column(String(300))               # human-readable description
+    requested_by: Mapped[str] = mapped_column(String(150), index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)  # pending/approved/rejected/cancelled
+    decided_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class IngestedTransaction(Base):
     """Transactions received via the push API — FMS's own history store for
     institutions that feed us events instead of granting database access."""

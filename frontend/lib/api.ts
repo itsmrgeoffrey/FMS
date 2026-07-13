@@ -92,7 +92,7 @@ export const api = {
 
   getSettings: (): Promise<Record<string, unknown>> => req("/settings"),
 
-  updateSettings: (payload: Record<string, unknown>): Promise<{ saved: boolean; restart_required: boolean }> =>
+  updateSettings: (payload: Record<string, unknown>): Promise<MaybePending<{ saved: boolean; restart_required: boolean }>> =>
     req("/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -150,14 +150,63 @@ export const api = {
       body: JSON.stringify({ current_password, new_password }),
     }),
   listUsers: (): Promise<AuthUser[]> => req("/auth/users"),
-  resetUserPassword: (userId: string): Promise<{ username: string; email: string | null; emailed: boolean; temp_password: string | null }> =>
+  createUser: (email: string, full_name: string, role: string): Promise<MaybePending<{ username: string; email: string | null; role: string; emailed: boolean; temp_password: string | null }>> =>
+    req("/auth/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, full_name, role }),
+    }),
+  resetUserPassword: (userId: string): Promise<MaybePending<{ username: string; email: string | null; emailed: boolean; temp_password: string | null }>> =>
     req(`/auth/users/${userId}/reset-password`, { method: "POST" }),
-  toggleUserActive: (userId: string): Promise<{ username: string; is_active: boolean }> =>
+  toggleUserActive: (userId: string): Promise<MaybePending<{ username: string; is_active: boolean }>> =>
     req(`/auth/users/${userId}/toggle-active`, { method: "POST" }),
-  setUserRole: (userId: string, role: string): Promise<{ username: string; role: string }> =>
+  setUserRole: (userId: string, role: string): Promise<MaybePending<{ username: string; role: string }>> =>
     req(`/auth/users/${userId}/role`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role }),
     }),
+
+  // Dual control (maker-checker) approvals
+  listApprovals: (): Promise<ApprovalsPage> => req("/approvals"),
+  approveChange: (id: string): Promise<{ approved: boolean; summary: string; result: Record<string, unknown> }> =>
+    req(`/approvals/${id}/approve`, { method: "POST" }),
+  rejectChange: (id: string, note?: string): Promise<{ rejected: boolean }> =>
+    req(`/approvals/${id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note: note ?? null }),
+    }),
+  cancelChange: (id: string): Promise<{ cancelled: boolean }> =>
+    req(`/approvals/${id}/cancel`, { method: "POST" }),
 };
+
+// Dual control: sensitive admin actions may return a queued approval instead of
+// the direct result when a second admin's sign-off is required.
+export type MaybePending<T> = (T & { pending?: false }) | {
+  pending: true;
+  approval_id: string;
+  summary: string;
+  message: string;
+};
+
+export interface Approval {
+  id: string;
+  action: string;
+  target: string | null;
+  summary: string;
+  requested_by: string;
+  requested_at: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+}
+
+export interface ApprovalsPage {
+  dual_control_active: boolean;
+  active_admins: number;
+  me: string;
+  pending: Approval[];
+  recent: Approval[];
+}
