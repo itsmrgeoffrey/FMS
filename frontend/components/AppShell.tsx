@@ -17,6 +17,7 @@ const ICONS = {
   audit: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
   admin: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
   demo: "M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z",
+  risk: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
 };
 
 const NAV_GROUPS: { section: string; requires?: string; items: { href: string; label: string; d: string; requires?: string }[] }[] = [
@@ -35,6 +36,7 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
   ] },
   { section: "Compliance", items: [
     { href: "/reports", label: "Reports (SAR/STR)", d: ICONS.reports },
+    { href: "/risk", label: "Risk Assessment", d: ICONS.risk },
     { href: "/audit", label: "Audit Trail", d: ICONS.audit, requires: "admin" },
   ] },
   { section: "System", requires: "admin", items: [

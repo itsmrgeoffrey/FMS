@@ -114,6 +114,47 @@ class PendingApproval(Base):
     decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class RiskAssessment(Base):
+    """Versioned institutional ML/TF risk assessment — the documented artifact
+    FinCEN's 2026 AML/CFT Program rule proposal requires. FMS structures the
+    assessment (category grid, National-Priorities checklist) and pre-populates
+    the activity snapshot from its own data ('reports filed' consideration);
+    the RATINGS and judgments are the institution's — FMS never auto-rates."""
+    __tablename__ = "risk_assessments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    version: Mapped[int] = mapped_column(Integer, index=True)
+    status: Mapped[str] = mapped_column(String(10), default="DRAFT", index=True)   # DRAFT / FINAL
+    title: Mapped[str] = mapped_column(String(200), default="Institutional ML/TF Risk Assessment")
+    categories: Mapped[list] = mapped_column(JSON, default=list)       # rows: area/item/inherent/controls/residual/notes
+    priorities: Mapped[list] = mapped_column(JSON, default=list)       # National Priorities checklist
+    activity_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    overall_rating: Mapped[str | None] = mapped_column(String(10), nullable=True)  # LOW/MODERATE/HIGH (officer's call)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(150))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    finalized_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class RuleChange(Base):
+    """Tuning log: one row per detection-parameter change, with before/after
+    values, who made it, and the documented rationale — the FFIEC expects
+    thresholds to be 'documented and periodically reviewed', and this table is
+    that evidence. Optionally carries the backtest summary the admin ran before
+    saving (predicted effect, to compare against actual)."""
+    __tablename__ = "rule_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    changed_by: Mapped[str] = mapped_column(String(150), index=True)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    old_values: Mapped[dict] = mapped_column(JSON, default=dict)
+    new_values: Mapped[dict] = mapped_column(JSON, default=dict)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    backtest: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
 class IngestedTransaction(Base):
     """Transactions received via the push API — FMS's own history store for
     institutions that feed us events instead of granting database access."""

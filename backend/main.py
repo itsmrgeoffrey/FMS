@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings as app_settings
 from backend.database import init_db
 from backend.logging_config import request_id_var, setup_logging
-from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest
+from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest, risk
 from backend.routers import settings as settings_routes
 from backend.services import poller, sanctions
 
@@ -35,13 +35,50 @@ async def _ofac_refresh_loop():
             logging.getLogger(__name__).warning(f"OFAC auto-refresh failed (keeping current list): {e}")
 
 
+async def _retention_loop():
+    """Optional retention enforcement (FMS_RETENTION_DAYS; 0 = off, the default).
+    Purges RAW INGESTED TRANSACTION rows older than the configured age, once a
+    day, and records each purge in the audit log. Cases, case actions, and the
+    audit log itself are never auto-purged — they are the compliance record."""
+    days = app_settings.retention_days
+    if days <= 0:
+        return
+    if days < 1825:
+        log.warning(
+            "FMS_RETENTION_DAYS=%s is below the BSA five-year record-retention period "
+            "(1825 days) — ensure another system retains these transaction records.", days,
+        )
+    from datetime import datetime, timedelta
+    from sqlalchemy import delete
+    from backend.database import SessionLocal
+    from backend.models import IngestedTransaction
+    from backend.routers import audit
+    while True:
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            async with SessionLocal() as db:
+                result = await db.execute(
+                    delete(IngestedTransaction).where(IngestedTransaction.timestamp < cutoff)
+                )
+                await db.commit()
+            purged = result.rowcount or 0
+            if purged:
+                log.info("Retention purge: removed %s ingested-transaction rows older than %s days", purged, days)
+                await audit.record("system", "RETENTION_PURGE",
+                                   detail=f"purged {purged} ingested-transaction rows older than {days} days")
+        except Exception as e:
+            log.warning(f"Retention purge failed (will retry tomorrow): {e}")
+        await asyncio.sleep(24 * 3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     poll_task = asyncio.create_task(poller.poll_loop())
     ofac_task = asyncio.create_task(_ofac_refresh_loop())
+    retention_task = asyncio.create_task(_retention_loop())
     yield
-    for task in (poll_task, ofac_task):
+    for task in (poll_task, ofac_task, retention_task):
         task.cancel()
         try:
             await task
@@ -108,3 +145,4 @@ app.include_router(audit.router)
 app.include_router(insights.router)
 app.include_router(ingest.router)
 app.include_router(approvals.router)
+app.include_router(risk.router)

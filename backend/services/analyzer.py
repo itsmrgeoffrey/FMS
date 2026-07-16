@@ -127,6 +127,29 @@ def apply_rule_overrides(rules: dict) -> None:
                 SMURFING_WINDOW_HOURS = value
 
 
+def snapshot_rules() -> dict:
+    """Current tunable parameters, in the same shape apply_rule_overrides()
+    accepts — used for the tuning log and to save/restore around backtests."""
+    return {
+        "ctr_thresholds": dict(_CTR_THRESHOLDS),
+        "sar_ratio": SAR_RATIO,
+        "structuring_band_ratio": STRUCTURING_BAND_RATIO,
+        "rolling_window_days": ROLLING_WINDOW_DAYS,
+        "smurfing_window_hours": SMURFING_WINDOW_HOURS,
+    }
+
+
+def restore_rules(snap: dict) -> None:
+    """Restore parameters captured by snapshot_rules() (backtest cleanup)."""
+    global SAR_RATIO, STRUCTURING_BAND_RATIO, ROLLING_WINDOW_DAYS, SMURFING_WINDOW_HOURS
+    _CTR_THRESHOLDS.clear()
+    _CTR_THRESHOLDS.update(snap["ctr_thresholds"])
+    SAR_RATIO = snap["sar_ratio"]
+    STRUCTURING_BAND_RATIO = snap["structuring_band_ratio"]
+    ROLLING_WINDOW_DAYS = snap["rolling_window_days"]
+    SMURFING_WINDOW_HOURS = snap["smurfing_window_hours"]
+
+
 def _ctr_threshold(currency: str) -> float:
     return _CTR_THRESHOLDS.get((currency or "USD").upper(), 10_000)
 
@@ -776,35 +799,50 @@ def _fallback_summary(
     return (opener + body + action).strip()
 
 
-# ─── Main entry point ─────────────────────────────────────────────────────────
+# ─── Deterministic verdict core ──────────────────────────────────────────────
+# The complete rules-only evaluation (no sanctions screening, no LLM). analyze()
+# builds on this, and rule backtesting replays it over stored history — one code
+# path, so a backtest result is exactly what the live engine would have done.
 
-async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> FraudAnalysis:
+_HARD_FRAUD_SIGNALS = frozenset(
+    {"near_threshold_amount", "velocity_clustering", "outward_smurfing", "multi_source_smurfing"}
+)
+
+
+def evaluate(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> dict:
     threshold = _ctr_threshold(txn.currency)
-
     profile = _compute_behavioral_profile(history, threshold)
     ctr = _assess_ctr(txn, history, threshold)
     risk = _compute_risk_score(txn, history, profile, threshold)
 
+    has_hard_signal = bool(_HARD_FRAUD_SIGNALS & risk.components.keys())
+    if risk.level == "LOW" and not has_hard_signal:
+        is_fraudulent, confidence = False, "LOW"
+    elif risk.level == "MEDIUM":
+        is_fraudulent, confidence = True, "MEDIUM"
+    else:
+        is_fraudulent, confidence = True, "HIGH"
+
+    sar_recommended, sar_reason = _assess_sar(txn, risk, is_fraudulent, threshold)
+    return {
+        "threshold": threshold, "profile": profile, "ctr": ctr, "risk": risk,
+        "is_fraudulent": is_fraudulent, "confidence": confidence,
+        "sar_recommended": sar_recommended, "sar_reason": sar_reason,
+    }
+
+
+# ─── Main entry point ─────────────────────────────────────────────────────────
+
+async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> FraudAnalysis:
+    verdict = evaluate(txn, history)
+    threshold, profile, ctr, risk = verdict["threshold"], verdict["profile"], verdict["ctr"], verdict["risk"]
+    is_fraudulent, confidence = verdict["is_fraudulent"], verdict["confidence"]
+    sar_recommended, sar_reason = verdict["sar_recommended"], verdict["sar_reason"]
+
     # Reasons are generated deterministically — no hallucination risk
     reasons = _plain_reasons(txn, risk, profile, ctr, threshold)
 
-    # Determine fraud verdict from risk level
-    hard_fraud_signals = {"near_threshold_amount", "velocity_clustering",
-                          "outward_smurfing", "multi_source_smurfing"}
-    has_hard_signal = bool(hard_fraud_signals & risk.components.keys())
-
-    if risk.level == "LOW" and not has_hard_signal:
-        is_fraudulent = False
-        confidence = "LOW"
-    elif risk.level == "MEDIUM":
-        is_fraudulent = True
-        confidence = "MEDIUM"
-    else:
-        is_fraudulent = True
-        confidence = "HIGH"
-
     fraud_type = _pick_fraud_type(risk) if is_fraudulent else None
-    sar_recommended, sar_reason = _assess_sar(txn, risk, is_fraudulent, threshold)
 
     # OFAC sanctions screening overrides the behavioural score: a listed
     # counterparty is a block/report obligation regardless of risk level.
@@ -827,12 +865,23 @@ async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransactio
             f"transaction must be blocked or rejected and reported to OFAC. Escalate to "
             f"your BSA/AML officer immediately."
         ] + reasons
-    elif sanctions_match:  # PEP
+    elif sanctions_match and sanctions_match.list_type == "PEP":
         reasons = [
             f"POLITICALLY EXPOSED PERSON — counterparty '{sanctions_match.query}' matches "
             f"{sanctions_match.source} entry '{sanctions_match.matched_name}' "
             f"({sanctions_match.score:.0%} match). Not a blocking obligation, but enhanced "
             f"due diligence is expected for PEP-linked transactions."
+        ] + reasons
+    elif sanctions_match:  # NON_SDN (OFAC Consolidated) or an institution-supplied list
+        is_fraudulent = True
+        confidence = "HIGH"
+        fraud_type = "watch-list match"
+        reasons = [
+            f"WATCH-LIST MATCH (review required) — counterparty '{sanctions_match.query}' matches "
+            f"{sanctions_match.source} entry '{sanctions_match.matched_name}' "
+            f"(program: {sanctions_match.program or 'N/A'}, {sanctions_match.score:.0%} match). "
+            f"Non-SDN lists carry program-specific restrictions rather than a blanket block "
+            f"obligation — review the listed program's requirements before processing."
         ] + reasons
 
     reasons_text = "\n".join(f"- {r}" for r in reasons)

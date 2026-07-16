@@ -1,19 +1,52 @@
 """Read-only aggregate endpoints powering the Customers, Rule Engine and Analytics pages."""
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import require_user
+from backend.auth import require_admin, require_user
 from backend.database import get_db
-from backend.models import FraudCase, User
+from backend.models import FraudCase, IngestedTransaction, RuleChange, User
 from backend.services import analyzer as A
 from backend.services import sanctions as S
 
 router = APIRouter(tags=["insights"])
 
 OPEN_STATUSES = ("OPEN", "UNDER_REVIEW")
+
+# FinCEN National AML/CFT Priorities (June 30, 2021 — the operative set, which
+# the 2026 AML/CFT Program rule proposal requires institutions to incorporate
+# into their risk assessments) mapped honestly to FMS coverage. "direct" =
+# detection signals target it; "partial" = FMS surfaces the money-movement
+# mechanics but predicate-crime attribution is human work; "screening" =
+# addressed via OFAC/PEP list screening rather than behavioral detection.
+NATIONAL_PRIORITIES: list[dict] = [
+    {"priority": "Corruption", "coverage": "screening",
+     "how": "OFAC screening (e.g. Global Magnitsky programs) on every party; optional PEP list "
+            "flags politically exposed persons for enhanced due diligence."},
+    {"priority": "Cybercrime, including relevant cybersecurity and virtual-currency considerations",
+     "coverage": "partial",
+     "how": "Account-takeover typology (established account + new channel/odd hours/new counterparty). "
+            "No virtual-asset-native analytics."},
+    {"priority": "Foreign and domestic terrorist financing", "coverage": "screening",
+     "how": "OFAC SDN screening (counter-terrorism programs) on every party; behavioral signals may "
+            "surface funneling patterns, but TF identification requires human investigation."},
+    {"priority": "Fraud", "coverage": "direct",
+     "how": "Behavioral-deviation, invoice-fraud, account-takeover, new-counterparty, velocity and "
+            "odd-hours signals target fraud typologies directly."},
+    {"priority": "Transnational criminal organization activity", "coverage": "partial",
+     "how": "Structuring/smurfing/velocity signals detect the laundering mechanics TCO proceeds use; "
+            "attributing activity to a TCO is the investigator's determination."},
+    {"priority": "Drug trafficking organization activity", "coverage": "partial",
+     "how": "Structuring and multi-source smurfing detection — the classic placement patterns for "
+            "drug proceeds — plus OFAC narcotics-program screening."},
+    {"priority": "Human trafficking and human smuggling", "coverage": "partial",
+     "how": "Funnel-style multi-source inflow detection; dedicated FinCEN HT advisory indicators "
+            "(e.g. specific merchant patterns) are not modeled."},
+    {"priority": "Proliferation financing", "coverage": "screening",
+     "how": "OFAC SDN and Consolidated-list screening (non-proliferation programs) on every party."},
+]
 
 
 @router.get("/customers")
@@ -135,6 +168,148 @@ async def screening_check(body: ScreenRequest, _user: User = Depends(require_use
     return {"screened": len(body.names), "hits": hits}
 
 
+# ─── FinCEN 314(a) batch scan ─────────────────────────────────────────────────
+
+class Scan314aRequest(BaseModel):
+    csv_text: str | None = None    # the FinCEN 314(a) subject file, pasted/uploaded as CSV text
+    names: list[str] | None = None # or a plain list of subject names
+    threshold: float = 0.90
+
+
+def _parse_314a_subjects(csv_text: str) -> list[str]:
+    """Extract subject names from a 314(a) CSV. Handles the common layouts:
+    a 'Business Name' or single 'Name' column, or 'Last Name' + 'First Name'
+    (+ 'Middle Name') columns. Falls back to the first cell per row when no
+    recognizable header is present."""
+    import csv as _csv
+    import io as _io
+
+    rows = [r for r in _csv.reader(_io.StringIO(csv_text)) if any(c.strip() for c in r)]
+    if not rows:
+        return []
+
+    header = [c.strip().lower() for c in rows[0]]
+
+    def col(*want: str) -> int | None:
+        for i, h in enumerate(header):
+            if any(w in h for w in want):
+                return i
+        return None
+
+    i_business = col("business name", "entity name")
+    i_name = col("subject name") if col("subject name") is not None else (
+        header.index("name") if "name" in header else None)
+    i_last, i_first, i_middle = col("last name"), col("first name"), col("middle name")
+    has_header = any(x is not None for x in (i_business, i_name, i_last))
+
+    subjects: list[str] = []
+    for r in (rows[1:] if has_header else rows):
+        def cell(i: int | None) -> str:
+            return r[i].strip() if i is not None and i < len(r) else ""
+        name = ""
+        if has_header:
+            name = cell(i_business) or cell(i_name)
+            if not name and cell(i_last):
+                name = " ".join(p for p in (cell(i_first), cell(i_middle), cell(i_last)) if p)
+        else:
+            name = (r[0] or "").strip()
+        if name:
+            subjects.append(name)
+    return subjects
+
+
+@router.post("/screening/314a")
+async def scan_314a(
+    body: Scan314aRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Scan a FinCEN 314(a) subject list against every party FMS has seen
+    (account holders and counterparties from ingested transactions, and case
+    counterparties). Admin-only — 314(a) lists are confidential. Results are a
+    screening aid: positive matches must be verified against your customer
+    records and reported through FinCEN's Secure Information Sharing System by
+    the institution; FMS does not transmit anything. The audit log records that
+    a scan ran and the counts — never the subject names."""
+    subjects = list(body.names or [])
+    if body.csv_text:
+        subjects += _parse_314a_subjects(body.csv_text)
+    subjects = [s for s in {s.strip() for s in subjects} if s]
+    if not subjects:
+        return {"error": "No subject names found in the input."}
+    if len(subjects) > 5000:
+        return {"error": "Maximum 5,000 subjects per scan."}
+
+    # Every party name FMS has seen, with where it appeared.
+    parties: dict[str, dict] = {}   # normalized -> {name, roles, accounts, occurrences}
+
+    def add_party(name: str | None, role: str, account: str | None):
+        norm = S._normalize(name)
+        if not norm:
+            return
+        p = parties.setdefault(norm, {"name": name, "roles": set(), "accounts": set(), "occurrences": 0})
+        p["roles"].add(role)
+        p["occurrences"] += 1
+        if account:
+            p["accounts"].add(account)
+
+    for holder, cp, acct in (await db.execute(
+        select(IngestedTransaction.account_holder_name,
+               IngestedTransaction.counterparty_name,
+               IngestedTransaction.account_id)
+    )).all():
+        add_party(holder, "account holder", acct)
+        add_party(cp, "counterparty", acct)
+    for cp, acct in (await db.execute(
+        select(FraudCase.counterparty_name, FraudCase.account_id)
+    )).all():
+        add_party(cp, "counterparty", acct)
+
+    # Token index so each subject is compared only against parties sharing a token.
+    token_index: dict[str, set[str]] = {}
+    for norm in parties:
+        for tok in norm.split():
+            token_index.setdefault(tok, set()).add(norm)
+
+    matches = []
+    for subject in subjects:
+        q = S._normalize(subject)
+        if not q:
+            continue
+        candidates: set[str] = set()
+        for tok in q.split():
+            candidates |= token_index.get(tok, set())
+        best_norm, best_score = None, 0.0
+        for cand in candidates:
+            score = S._similarity(q, cand)
+            if score >= body.threshold and score > best_score:
+                best_norm, best_score = cand, score
+        if best_norm:
+            p = parties[best_norm]
+            matches.append({
+                "subject": subject,
+                "matched_party": p["name"],
+                "score": round(best_score, 3),
+                "seen_as": sorted(p["roles"]),
+                "occurrences": p["occurrences"],
+                "account_ids": sorted(p["accounts"])[:10],
+            })
+
+    from backend.routers import audit as audit_router
+    await audit_router.record(
+        admin.username, "314A_SCAN",
+        detail=f"subjects={len(subjects)}; parties_checked={len(parties)}; matches={len(matches)}",
+    )
+    return {
+        "subjects_screened": len(subjects),
+        "parties_checked": len(parties),
+        "matches": matches,
+        "note": "Screening aid only. Verify positive matches against customer records and respond "
+                "via FinCEN's Secure Information Sharing System within the required window. "
+                "FMS transmits nothing and does not store the subject list.",
+    }
+
+
 @router.get("/search")
 async def search(q: str = Query(..., min_length=2, max_length=100),
                  db: AsyncSession = Depends(get_db),
@@ -203,8 +378,151 @@ async def rules(_user: User = Depends(require_user)):
             {"level": "CRITICAL", "range": "76–100"},
         ],
         "sanctions": {
-            "list": "OFAC SDN (+ optional PEP list)",
+            "list": "OFAC SDN + OFAC Consolidated non-SDN (+ optional PEP and institution-supplied lists)",
             "match_threshold": f"{S.DEFAULT_THRESHOLD:.2f} name-similarity",
-            "note": "A sanctions match overrides the behavioral score and forces a block/report case.",
+            "note": "An SDN match overrides the behavioral score and forces a block/report case; "
+                    "Consolidated/other-list matches raise a review-required case; PEP matches "
+                    "annotate for enhanced due diligence.",
         },
+        "national_priorities": {
+            "note": "FinCEN National AML/CFT Priorities (June 30, 2021) and how this engine's "
+                    "signals map to them. Coverage is stated honestly: FMS detects money-movement "
+                    "mechanics and screens lists; predicate-crime attribution is always the "
+                    "investigator's determination.",
+            "items": NATIONAL_PRIORITIES,
+        },
+    }
+
+
+# ─── Rule tuning: backtest + change history ───────────────────────────────────
+
+class BacktestRequest(BaseModel):
+    proposed: dict                 # same shape as the rules override (partial ok)
+    days: int = 90                 # replay window
+    limit: int = 5000              # cap on transactions replayed
+
+
+def _replay(normalized: list) -> dict:
+    """Replay the deterministic engine over the stored transactions under the
+    CURRENT global parameters. History for each transaction = the prior
+    transactions of the same account within the replay set (chronological)."""
+    by_account: dict[str, list] = {}
+    flagged = sar = ctr = 0
+    verdicts = []
+    for norm in normalized:
+        history = by_account.setdefault(norm.account_id, [])
+        v = A.evaluate(norm, list(history))
+        verdicts.append(v)
+        history.append(norm)
+        if v["is_fraudulent"]:
+            flagged += 1
+        if v["sar_recommended"]:
+            sar += 1
+        if v["ctr"].required:
+            ctr += 1
+    return {"flagged": flagged, "sar_recommended": sar, "ctr_required": ctr, "verdicts": verdicts}
+
+
+@router.post("/rules/backtest")
+async def rules_backtest(
+    body: BacktestRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """What would this parameter change have flagged historically? Replays the
+    stored ingested transactions through the SAME deterministic engine under
+    current vs. proposed parameters and reports the difference — evidence for
+    the tuning log (FFIEC expects threshold changes to be assessed and
+    documented). Read-only: proposed values are applied to the engine only for
+    the duration of the replay, then restored."""
+    from backend.routers.ingest import _to_normalized
+
+    cutoff = datetime.utcnow() - timedelta(days=max(1, min(body.days, 365)))
+    rows = (await db.execute(
+        select(IngestedTransaction)
+        .where(IngestedTransaction.timestamp >= cutoff)
+        .order_by(IngestedTransaction.timestamp.desc())
+        .limit(max(10, min(body.limit, 20_000)))
+    )).scalars().all()
+    rows = list(reversed(rows))  # chronological for coherent history replay
+    if not rows:
+        return {"error": "No ingested transactions in the replay window — nothing to backtest.",
+                "replayed": 0}
+
+    normalized = [_to_normalized(r) for r in rows]
+
+    # The evaluate() loop is fully synchronous — no awaits between apply and
+    # restore — so the temporary parameter swap can't leak into live requests
+    # handled by this single-threaded event loop.
+    current = _replay(normalized)
+    snap = A.snapshot_rules()
+    try:
+        A.apply_rule_overrides(body.proposed or {})
+        proposed = _replay(normalized)
+    finally:
+        A.restore_rules(snap)
+
+    changed = []
+    for row, norm, cur_v, new_v in zip(rows, normalized, current["verdicts"], proposed["verdicts"]):
+        if (cur_v["is_fraudulent"], cur_v["sar_recommended"], cur_v["ctr"].required) != \
+           (new_v["is_fraudulent"], new_v["sar_recommended"], new_v["ctr"].required):
+            changed.append({
+                "external_id": row.external_id,
+                "account_id": norm.account_id,
+                "amount": norm.amount,
+                "currency": norm.currency,
+                "timestamp": str(norm.timestamp),
+                "current": {"flagged": cur_v["is_fraudulent"], "level": cur_v["risk"].level,
+                            "sar": cur_v["sar_recommended"], "ctr": cur_v["ctr"].required},
+                "proposed": {"flagged": new_v["is_fraudulent"], "level": new_v["risk"].level,
+                             "sar": new_v["sar_recommended"], "ctr": new_v["ctr"].required},
+            })
+            if len(changed) >= 15:
+                break
+
+    def _summary(r: dict) -> dict:
+        return {k: r[k] for k in ("flagged", "sar_recommended", "ctr_required")}
+
+    return {
+        "replayed": len(rows),
+        "window_days": body.days,
+        "note": "Replay of stored ingested transactions through the live deterministic engine. "
+                "Account history is approximated within the replay window; sanctions screening "
+                "and case creation are not part of a backtest.",
+        "current": _summary(current),
+        "proposed": _summary(proposed),
+        "changed_examples": changed,
+        "changed_count": sum(
+            1 for c, p in zip(current["verdicts"], proposed["verdicts"])
+            if (c["is_fraudulent"], c["sar_recommended"], c["ctr"].required)
+            != (p["is_fraudulent"], p["sar_recommended"], p["ctr"].required)
+        ),
+    }
+
+
+@router.get("/rules/changes")
+async def rules_changes(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_user),
+):
+    """Tuning log: every detection-parameter change with before/after values,
+    actor, rationale, and any backtest evidence attached at save time."""
+    rows = (await db.execute(
+        select(RuleChange).order_by(RuleChange.changed_at.desc()).limit(limit)
+    )).scalars().all()
+    return {
+        "count": len(rows),
+        "items": [
+            {
+                "id": r.id,
+                "changed_by": r.changed_by,
+                "changed_at": str(r.changed_at),
+                "old_values": r.old_values,
+                "new_values": r.new_values,
+                "rationale": r.rationale,
+                "backtest": r.backtest,
+            }
+            for r in rows
+        ],
     }

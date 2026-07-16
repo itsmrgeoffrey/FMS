@@ -153,6 +153,107 @@ export interface RulesConfig {
   scoring_components: { name: string; points: string; detail: string }[];
   risk_levels: { level: string; range: string }[];
   sanctions: { list: string; match_threshold: string; note: string };
+  national_priorities: {
+    note: string;
+    items: { priority: string; coverage: "direct" | "partial" | "screening"; how: string }[];
+  };
+}
+
+export interface RuleChangeEntry {
+  id: number;
+  changed_by: string;
+  changed_at: string;
+  old_values: Record<string, unknown>;
+  new_values: Record<string, unknown>;
+  rationale: string | null;
+  backtest: Record<string, unknown> | null;
+}
+
+export interface BacktestSummary {
+  flagged: number;
+  sar_recommended: number;
+  ctr_required: number;
+}
+
+export interface BacktestResult {
+  replayed: number;
+  window_days: number;
+  note: string;
+  current: BacktestSummary;
+  proposed: BacktestSummary;
+  changed_count: number;
+  changed_examples: {
+    external_id: string;
+    account_id: string;
+    amount: number;
+    currency: string;
+    timestamp: string;
+    current: { flagged: boolean; level: string; sar: boolean; ctr: boolean };
+    proposed: { flagged: boolean; level: string; sar: boolean; ctr: boolean };
+  }[];
+  error?: string;
+}
+
+export interface Scan314aMatch {
+  subject: string;
+  matched_party: string | null;
+  score: number;
+  seen_as: string[];
+  occurrences: number;
+  account_ids: string[];
+}
+
+export interface Scan314aResult {
+  subjects_screened: number;
+  parties_checked: number;
+  matches: Scan314aMatch[];
+  note: string;
+  error?: string;
+}
+
+export type RiskRating = "" | "LOW" | "MODERATE" | "HIGH";
+
+export interface RiskCategoryRow {
+  area: string;
+  item: string;
+  inherent: RiskRating;
+  controls: string;
+  residual: RiskRating;
+  notes: string;
+}
+
+export interface RiskPriorityRow {
+  priority: string;
+  fms_coverage: string;
+  fms_how: string;
+  applicable: boolean | null;
+  notes: string;
+}
+
+export interface RiskAssessmentMeta {
+  id: string;
+  version: number;
+  status: "DRAFT" | "FINAL";
+  title: string;
+  overall_rating: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  finalized_by: string | null;
+  finalized_at: string | null;
+}
+
+export interface RiskAssessment extends RiskAssessmentMeta {
+  categories: RiskCategoryRow[];
+  priorities: RiskPriorityRow[];
+  activity_snapshot: Record<string, unknown>;
+  summary: string | null;
+}
+
+export interface RiskAssessmentList {
+  count: number;
+  latest: RiskAssessment | null;
+  versions: RiskAssessmentMeta[];
 }
 
 export interface Stats {

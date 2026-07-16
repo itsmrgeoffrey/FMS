@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     alert_webhook_url: str = os.getenv("ALERT_WEBHOOK_URL", "")
     # Hours between automatic OFAC SDN list refreshes (0 disables).
     ofac_refresh_hours: int = int(os.getenv("FMS_OFAC_REFRESH_HOURS", "24"))
+    # Retention enforcement for RAW INGESTED TRANSACTION rows only (0 = off,
+    # the default: nothing is ever auto-deleted). Cases, case actions, and the
+    # audit log are never auto-purged — they are the compliance record. Values
+    # below 1825 days (the BSA five-year retention period) log a warning.
+    retention_days: int = int(os.getenv("FMS_RETENTION_DAYS", "0") or 0)
     fms_api_key: str = os.getenv("FMS_API_KEY", "")
     # Key for the push-ingestion API (falls back to FMS_API_KEY if unset).
     fms_ingest_api_key: str = os.getenv("FMS_INGEST_API_KEY", "")

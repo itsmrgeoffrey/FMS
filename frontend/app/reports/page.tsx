@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, auth } from "@/lib/api";
+import type { Scan314aResult } from "@/types";
 
 type Row = Record<string, unknown>;
 
@@ -15,6 +16,11 @@ export default function ReportsPage() {
   const [tab, setTab] = useState<"sar" | "ctr">("sar");
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scan, setScan] = useState<Scan314aResult | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const isAdmin = auth.user()?.role === "admin";
 
   const load = useCallback(() => {
     setLoading(true);
@@ -24,6 +30,22 @@ export default function ReportsPage() {
   useEffect(() => { load(); }, [load]);
 
   const downloadUrl = tab === "sar" ? api.sarReportUrl() : api.ctrReportUrl();
+  const xmlUrl = tab === "sar" ? api.sarXmlDraftUrl() : api.ctrXmlDraftUrl();
+
+  async function run314a(file: File) {
+    setScanning(true);
+    setScanError(null);
+    setScan(null);
+    try {
+      const text = await file.text();
+      setScan(await api.scan314a({ csv_text: text }));
+    } catch (e) {
+      setScanError(String(e));
+    } finally {
+      setScanning(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -32,9 +54,15 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Reports (SAR / STR)</h1>
           <p className="text-sm text-gray-500 mt-1">Filing worksheets for your compliance officer. Not filed automatically.</p>
         </div>
-        <a href={downloadUrl} className="text-sm font-medium px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">
-          Export {tab.toUpperCase()} (CSV)
-        </a>
+        <div className="flex gap-2">
+          <a href={downloadUrl} className="text-sm font-medium px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">
+            Export {tab.toUpperCase()} (CSV)
+          </a>
+          <a href={xmlUrl} title="Batch XML structured after the FinCEN E-Filing format. DRAFT — complete the marked items and validate with FinCEN's batch validator before upload."
+            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+            Batch XML (draft)
+          </a>
+        </div>
       </div>
 
       <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium w-fit">
@@ -97,8 +125,67 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {/* FinCEN 314(a) scan (admin) */}
+      {isAdmin && (
+        <section className="bg-white rounded-lg border border-gray-200 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-700">FinCEN 314(a) scan</h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Upload the 314(a) subject list (CSV) — FMS scans it against every account holder and counterparty it has seen. The file is scanned in memory and never stored.
+              </p>
+            </div>
+            <label className={`text-sm font-medium px-3 py-1.5 rounded-lg border cursor-pointer ${scanning ? "opacity-50" : "border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"}`}>
+              {scanning ? "Scanning..." : "Upload subject list"}
+              <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" disabled={scanning}
+                onChange={(e) => e.target.files?.[0] && run314a(e.target.files[0])} />
+            </label>
+          </div>
+          {scanError && <p className="text-sm text-red-600">{scanError}</p>}
+          {scan && !scan.error && (
+            <div className="mt-2">
+              <p className="text-sm text-gray-700 mb-2">
+                <span className="font-semibold">{scan.subjects_screened}</span> subject(s) screened against{" "}
+                <span className="font-semibold">{scan.parties_checked}</span> known parties —{" "}
+                <span className={`font-semibold ${scan.matches.length ? "text-red-700" : "text-green-700"}`}>
+                  {scan.matches.length} match(es)
+                </span>
+              </p>
+              {scan.matches.length > 0 && (
+                <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
+                        <th className="px-3 py-2 font-medium">Subject</th>
+                        <th className="px-3 py-2 font-medium">Matched party</th>
+                        <th className="px-3 py-2 font-medium">Score</th>
+                        <th className="px-3 py-2 font-medium">Seen as</th>
+                        <th className="px-3 py-2 font-medium">Accounts</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scan.matches.map((m, i) => (
+                        <tr key={i} className="border-b border-gray-50">
+                          <td className="px-3 py-2 font-medium text-gray-900">{m.subject}</td>
+                          <td className="px-3 py-2 text-gray-700">{m.matched_party}</td>
+                          <td className="px-3 py-2 text-gray-600">{Math.round(m.score * 100)}%</td>
+                          <td className="px-3 py-2 text-gray-600">{m.seen_as.join(", ")}</td>
+                          <td className="px-3 py-2 font-mono text-xs text-gray-600">{m.account_ids.join(", ")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-2">{scan.note}</p>
+            </div>
+          )}
+          {scan?.error && <p className="text-sm text-amber-700">{scan.error}</p>}
+        </section>
+      )}
+
       <p className="text-xs text-gray-400">
-        Add <code className="font-mono">?format=fincen</code> to the report endpoints for Form 111/112 field worksheets. FMS prepares filings; it does not transmit them to FinCEN.
+        Add <code className="font-mono">?format=fincen</code> for Form 111/112 field worksheets, or <code className="font-mono">?format=xml</code> for a draft batch XML (complete and validate in FinCEN&apos;s E-Filing batch validator before upload). FMS prepares filings; it does not transmit them to FinCEN.
       </p>
     </div>
   );

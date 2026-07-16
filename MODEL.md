@@ -1,6 +1,6 @@
 # Detection model methodology
 
-This document describes every threshold and rule in the FMS risk engine, the rationale behind each, and how the design maps to US supervisory expectations for model risk management (FRB SR 11-7 / OCC 2011-12) and the FFIEC BSA/AML Examination Manual's expectations for suspicious-activity monitoring systems.
+This document describes every threshold and rule in the FMS risk engine, the rationale behind each, and how the design maps to US supervisory expectations for model risk management (interagency SR 26-2 (2026), which superseded FRB SR 11-7 / OCC 2011-12 and the 2021 interagency statement on model risk for BSA/AML systems) and the FFIEC BSA/AML Examination Manual's expectations for suspicious-activity monitoring systems. SR 26-2's risk-based, materiality-scaled oversight expectations favor exactly this kind of simple, fully documented deterministic engine.
 
 > **Scope honesty:** FMS is an open-source project, not a validated production model. This document provides the *documentation* layer of model risk management — inventory, design rationale, and testing evidence. Independent validation, institution-specific tuning, and above/below-the-line testing on production data remain the deploying institution's responsibility.
 

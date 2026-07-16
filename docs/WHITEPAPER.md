@@ -29,7 +29,7 @@ The problem is one of national importance, not merely commercial convenience. Un
 
 Three principles drove every architectural decision.
 
-**2.1 Determinism over black boxes.** Every detection decision in FMS is produced by explicit, inspectable rules: threshold comparisons, rolling-window aggregations, z-score bands against an account's own history. There is no machine-learning classifier in the decision path. This is a deliberate position, not a limitation of ambition: supervisory guidance on model risk (FRB SR 11-7 / OCC 2011-12) expects institutions to explain and validate what their models do, and an alert that cannot be explained cannot be defended in an examination — or acted on confidently by an analyst. Every FMS alert carries the complete list of signals that fired, each with a plain-English reason containing the actual numbers involved.
+**2.1 Determinism over black boxes.** Every detection decision in FMS is produced by explicit, inspectable rules: threshold comparisons, rolling-window aggregations, z-score bands against an account's own history. There is no machine-learning classifier in the decision path. This is a deliberate position, not a limitation of ambition: supervisory guidance on model risk (interagency SR 26-2 (2026), successor to FRB SR 11-7 / OCC 2011-12) expects institutions to explain and validate what their models do, and an alert that cannot be explained cannot be defended in an examination — or acted on confidently by an analyst. Every FMS alert carries the complete list of signals that fired, each with a plain-English reason containing the actual numbers involved.
 
 **2.2 The machine flags; the human decides.** FMS never blocks a transaction, files a report, or closes a case on its own. It surfaces activity, computes obligations, prepares filing worksheets, and tracks deadlines; a named human confirms, dismisses, or escalates — and that decision is recorded immutably with their identity. This division of labor matches both regulatory reality (filings are the institution's responsibility) and operational safety (a false positive that blocks a legitimate payroll is its own harm).
 
@@ -153,7 +153,7 @@ Financial-crime monitoring should not be a luxury good. The regulatory framework
 4. 31 CFR § 1010.314 — Structured transactions.
 5. 31 CFR Part 501 — Reporting, procedures and penalties (OFAC).
 6. FFIEC BSA/AML Examination Manual.
-7. Board of Governors of the Federal Reserve System, SR 11-7: *Guidance on Model Risk Management* (2011); OCC Bulletin 2011-12.
+7. Board of Governors of the Federal Reserve System, SR 11-7: *Guidance on Model Risk Management* (2011); OCC Bulletin 2011-12; superseded by interagency SR 26-2: *Revised Guidance on Model Risk Management* (April 2026).
 8. US Department of the Treasury, Office of Foreign Assets Control — Specially Designated Nationals and Blocked Persons List.
 9. FinCEN — BSA E-Filing System; FinCEN Form 112 (CTR); FinCEN Form 111 (SAR).
 

@@ -1,4 +1,7 @@
-import type { CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig, AnalyticsKpis } from "@/types";
+import type {
+  CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig, AnalyticsKpis,
+  BacktestResult, RuleChangeEntry, Scan314aResult, RiskAssessment, RiskAssessmentList,
+} from "@/types";
 
 const BASE = "/api";
 
@@ -54,8 +57,8 @@ async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json();
 }
 
-function reportUrl(kind: "ctr" | "sar", params: Record<string, string | undefined> = {}): string {
-  const qs = new URLSearchParams({ format: "csv" });
+function reportUrl(kind: "ctr" | "sar", params: Record<string, string | undefined> = {}, format = "csv"): string {
+  const qs = new URLSearchParams({ format });
   for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
   return `${BASE}/reports/${kind}?${qs}`;
 }
@@ -110,11 +113,46 @@ export const api = {
   getHealth: (): Promise<{ status: string; bank_db_connected: boolean; poller_running: boolean; last_poll_at: string | null; last_error: string | null }> =>
     req("/health"),
 
-  // Regulatory filing exports (CSV download links).
+  // Regulatory filing exports (CSV + draft batch XML download links).
   ctrReportUrl: (params?: Record<string, string | undefined>) => reportUrl("ctr", params),
   sarReportUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params),
+  ctrXmlDraftUrl: (params?: Record<string, string | undefined>) => reportUrl("ctr", params, "xml"),
+  sarXmlDraftUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params, "xml"),
   getCtrReport: (): Promise<{ count: number; items: Record<string, unknown>[] }> => req("/reports/ctr"),
   getSarReport: (): Promise<{ count: number; items: Record<string, unknown>[] }> => req("/reports/sar"),
+
+  // Rule tuning: backtest + change history
+  backtestRules: (proposed: Record<string, unknown>, days = 90): Promise<BacktestResult> =>
+    req("/rules/backtest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ proposed, days }),
+    }),
+  getRuleChanges: (limit = 50): Promise<{ count: number; items: RuleChangeEntry[] }> =>
+    req(`/rules/changes?limit=${limit}`),
+
+  // FinCEN 314(a) batch scan (admin)
+  scan314a: (payload: { csv_text?: string; names?: string[] }): Promise<Scan314aResult> =>
+    req("/screening/314a", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+
+  // Institutional risk assessment
+  getRiskAssessments: (): Promise<RiskAssessmentList> => req("/risk-assessment"),
+  getRiskAssessment: (id: string): Promise<RiskAssessment> => req(`/risk-assessment/${id}`),
+  createRiskDraft: (): Promise<RiskAssessment> => req("/risk-assessment", { method: "POST" }),
+  updateRiskAssessment: (id: string, payload: Record<string, unknown>): Promise<RiskAssessment> =>
+    req(`/risk-assessment/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  refreshRiskSnapshot: (id: string): Promise<RiskAssessment> =>
+    req(`/risk-assessment/${id}/refresh-snapshot`, { method: "POST" }),
+  finalizeRiskAssessment: (id: string): Promise<RiskAssessment> =>
+    req(`/risk-assessment/${id}/finalize`, { method: "POST" }),
 
   // Auth
   signup: (email: string, password: string, full_name?: string): Promise<{ token: string; user: AuthUser }> =>

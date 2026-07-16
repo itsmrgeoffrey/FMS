@@ -123,6 +123,19 @@ async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
         result.sanctions_detail = f"{result.sanctions_detail}; {detail}" if result.sanctions_detail else detail
         result.is_fraudulent, result.confidence, result.fraud_type = True, "HIGH", "sanctions match"
         result.reasons = [f"OFAC SANCTIONS MATCH — {detail}. Block or reject and report to OFAC."] + result.reasons
+    elif holder_hit and holder_hit.list_type == "PEP":
+        result.reasons = [
+            f"POLITICALLY EXPOSED PERSON — account holder '{body.account_holder_name}' matches "
+            f"{holder_hit.source} entry '{holder_hit.matched_name}' ({holder_hit.score:.0%} match). "
+            f"Enhanced due diligence expected."
+        ] + result.reasons
+    elif holder_hit:  # NON_SDN (OFAC Consolidated) or institution-supplied list
+        result.is_fraudulent, result.confidence, result.fraud_type = True, "HIGH", "watch-list match"
+        result.reasons = [
+            f"WATCH-LIST MATCH (review required) — account holder '{body.account_holder_name}' matches "
+            f"{holder_hit.source} entry '{holder_hit.matched_name}' (program: {holder_hit.program or 'N/A'}, "
+            f"{holder_hit.score:.0%} match). Review the listed program's restrictions before processing."
+        ] + result.reasons
 
     case = FraudCase(
         source_table="api", source_txn_id=body.external_id, account_id=body.account_id,

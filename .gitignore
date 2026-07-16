@@ -19,8 +19,13 @@ logs/
 
 # Downloaded OFAC list data (refreshed via scripts/update_ofac.py; sample stays committed)
 data/ofac_sdn.json
+data/ofac_consolidated.json
 data/sdn.csv
 data/alt.csv
+data/cons_prim.csv
+data/cons_alt.csv
+# Institution-supplied screening lists (may contain internal watch-list data)
+data/extra_lists/
 
 # Private production environment — real credentials, NEVER committed
 /prod/

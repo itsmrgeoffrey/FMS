@@ -22,10 +22,13 @@ Financial-crime detection protects the integrity of the payment system — money
   - Behavioral deviation from an account's own baseline
   - New counterparty / new channel / odd-hours signals
   - Payroll/batch suppression so legitimate bulk runs don't false-positive
-- **OFAC sanctions screening** — every counterparty is screened against the OFAC SDN list (refresh with `scripts/update_ofac.py`); a match forces a block-or-reject case regardless of risk score. Optional PEP list support (`data/pep.json`) for enhanced-due-diligence flags.
+- **Sanctions & watch-list screening** — every party is screened against the OFAC SDN list (block-or-reject case regardless of risk score) and the OFAC Consolidated non-SDN lists (review-required case), both refreshed by `scripts/update_ofac.py`. Bring-your-own lists (UN/EU/UK or internal) via `data/extra_lists/*.json`, plus optional PEP list support (`data/pep.json`) for enhanced-due-diligence flags.
+- **FinCEN 314(a) batch scan** — upload the 314(a) subject list and FMS scans it against every account holder and counterparty it has seen (in memory; the list is never stored). Positive matches are the institution's to verify and report via FinCEN's SISS.
+- **Institutional risk assessment** — the documented, versioned ML/TF risk assessment FinCEN's 2026 Program rule proposal requires: a rated category grid (products/customers/geographies/channels), the National AML/CFT Priorities checklist pre-mapped to FMS detection coverage, and an activity snapshot auto-filled from your own case data. FMS structures it; the ratings are the officer's.
+- **Rule backtesting + tuning log** — test a threshold change against your stored history ("what would this have flagged?") before saving it; every change is recorded with before/after values, actor, rationale, and the backtest evidence — the documented-review trail examiners ask for.
 - **CTR assessment** — single-transaction and same-day aggregate detection against currency-aware thresholds (FinCEN USD $10,000 and local equivalents).
 - **SAR assessment** — recommends a Suspicious Activity Report for structuring/smurfing (any amount) and for suspicious activity at/above the SAR threshold, with **30-day filing-deadline tracking**.
-- **FinCEN filing worksheets** — `/reports/ctr?format=fincen` and `/reports/sar?format=fincen` emit Form 112 / Form 111 field structures pre-filled from transaction data, with explicit lists of what still needs KYC records and officer review.
+- **FinCEN filing worksheets + draft batch XML** — `/reports/ctr?format=fincen` and `/reports/sar?format=fincen` emit Form 112 / Form 111 field structures pre-filled from transaction data, with explicit lists of what still needs KYC records and officer review. `?format=xml` produces a **draft** batch file structured after the FinCEN E-Filing format, with every incomplete item marked — the officer completes it and validates it in FinCEN's batch validator before upload.
 - **Plain-English case summaries** — an LLM writes an officer-readable explanation, with a **deterministic fallback** so an AI outage never blocks a case from being created. Point `LLM_BASE_URL` at a local OpenAI-compatible endpoint (e.g. Ollama) and no transaction data leaves your infrastructure.
 - **Case management + audit trail** — open / under-review / confirmed / dismissed / escalated, every action attributed to a named actor.
 - **Filing exports** — `/reports/ctr` and `/reports/sar` as JSON or CSV, ready to hand to your filer.
@@ -143,7 +146,19 @@ A full operator's manual — sign-in, roles, working cases, reports, administrat
 
 ## Methodology
 
-Every threshold, scoring rule, and screening parameter is documented — with its regulatory basis and testing evidence — in [MODEL.md](MODEL.md), written to support FFIEC/SR 11-7-style model documentation expectations.
+Every threshold, scoring rule, and screening parameter is documented — with its regulatory basis and testing evidence — in [MODEL.md](MODEL.md), written to support FFIEC and interagency model-risk documentation expectations (SR 26-2, the 2026 successor to SR 11-7).
+
+## Deliberate scope boundaries
+
+Some capabilities are **intentionally** out of scope. Stating why matters as much as the features themselves — a tool that overclaims is a compliance risk, not a compliance aid:
+
+- **Full entity resolution.** FMS links activity per account and matches names transparently; it does not attempt probabilistic identity graphs across accounts. Done badly, entity resolution silently merges the wrong people — a light, inspectable version (shared counterparties/identifiers) is on the roadmap; a black-box one is not.
+- **The OFAC 50% ownership rule.** Requires beneficial-ownership data FMS does not hold. Institutions with ownership records can express them as alias entries in an extra screening list.
+- **ML/AI detection.** Deliberate and permanent: deterministic rules are the feature. Supervisory model-risk guidance (SR 26-2) expects institutions to explain and validate their models — an alert you can't explain is an alert you can't defend. The optional LLM writes prose only and never decides anything.
+- **Transmitting filings to FinCEN.** E-filing requires institution-level enrollment, and the final narrative and determination are an officer's legal responsibility. FMS prepares everything up to that line — worksheets, draft batch XML, deadline tracking — and stops there on purpose.
+- **KYC/CDD onboarding.** FMS is monitoring, not identity. It consumes what your onboarding process knows (and marks exactly which filing fields need those records); owning customer identification would make it a different, worse product.
+- **Horizontal scale-out.** The app store runs on SQLite out of the box and on SQL Server/PostgreSQL via `FMS_APP_DB_URL`; the poller and in-memory login throttle are single-node by design. That comfortably serves the community-institution segment FMS targets; multi-node coordination is future work, not a hidden limitation.
+- **Encryption at rest / SOC 2.** Storage encryption belongs to the database engine and volume layer (see [SECURITY.md](SECURITY.md)); SOC 2 is an audit of an operating organization, not a software feature. FMS is built to be deployable *into* such an environment.
 
 ## License
 

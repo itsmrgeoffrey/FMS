@@ -1,18 +1,28 @@
-"""OFAC sanctions screening.
+"""Sanctions and watch-list screening.
 
-Screens a transaction counterparty against the US Treasury OFAC Specially
-Designated Nationals (SDN) list. A hit is the most serious signal FMS produces:
-under OFAC regulations a US person generally must **block or reject** a
-transaction involving a listed party and report it to OFAC — this is separate
-from, and overrides, the fraud-risk score.
+Screens transaction parties against, in order of severity:
 
-The list is loaded from `data/ofac_sdn.json` (produced by `scripts/update_ofac.py`
-from the live OFAC download) if present, otherwise from the bundled
-`data/ofac_sdn.sample.json` so the system works out of the box for testing.
+  * **OFAC SDN** (`data/ofac_sdn.json`, or the bundled sample) — a hit is the
+    most serious signal FMS produces: under OFAC regulations a US person
+    generally must **block or reject** the transaction and report it to OFAC.
+  * **OFAC Consolidated non-SDN lists** (`data/ofac_consolidated.json`) — e.g.
+    Sectoral Sanctions (SSI). A match carries *program-specific* restrictions,
+    not a blanket block obligation: FMS raises a review-required case.
+  * **Institution-supplied lists** (`data/extra_lists/*.json`) — bring-your-own
+    UN / EU / UK or internal watch lists. Same JSON shape as the OFAC files:
+    `[{"name": ..., "program": ..., "type": ..., "source": ..., "list_type": ...}]`
+    with `list_type` one of `"SDN"`-like blocking (`"SDN"`), review (`"OTHER"`,
+    the default) or `"PEP"`.
+  * **PEP list** (`data/pep.json`) — enhanced-due-diligence signal only.
 
-Matching is intentionally transparent (normalized exact + token-overlap + string
-similarity) so every hit is explainable. It is a screening aid, not a
-determination — a human must adjudicate every alert.
+Both OFAC files are produced by `scripts/update_ofac.py` (or the in-app
+refresh). Matching is intentionally transparent (normalized exact +
+token-overlap + string similarity) so every hit is explainable. It is a
+screening aid, not a determination — a human must adjudicate every alert.
+
+Deliberately out of scope (documented, not silently missing): the OFAC 50%
+ownership rule requires beneficial-ownership data FMS does not hold; screening
+here is name-based only.
 """
 import json
 import logging
@@ -26,6 +36,12 @@ log = logging.getLogger(__name__)
 _DATA_DIR = Path(__file__).parent.parent.parent / "data"
 _FULL_LIST = _DATA_DIR / "ofac_sdn.json"
 _SAMPLE_LIST = _DATA_DIR / "ofac_sdn.sample.json"
+# OFAC Consolidated (non-SDN) lists — e.g. Sectoral Sanctions. Program-specific
+# restrictions, not a blanket block: matches are review-required, not block/reject.
+_CONSOLIDATED_LIST = _DATA_DIR / "ofac_consolidated.json"
+# Institution-supplied lists (UN/EU/UK or internal watch lists), one JSON file
+# per list. Entries may carry their own list_type; default "OTHER" (review).
+_EXTRA_LISTS_DIR = _DATA_DIR / "extra_lists"
 # Optional politically-exposed-persons list (same JSON shape). PEP matches are
 # an enhanced-due-diligence signal, NOT a block/reject obligation like SDN hits —
 # callers distinguish them via SanctionsMatch.list_type.
@@ -40,6 +56,10 @@ _NOISE_TOKENS = {
 
 DEFAULT_THRESHOLD = 0.90
 
+# When the same name appears on multiple lists, the more severe listing must
+# win (an SDN block obligation never loses to a PEP/watch-list annotation).
+_SEVERITY = {"SDN": 3, "NON_SDN": 2, "OTHER": 2, "PEP": 1}
+
 
 @dataclass
 class SanctionsMatch:
@@ -49,7 +69,10 @@ class SanctionsMatch:
     program: str
     sdn_type: str
     source: str
-    list_type: str = "SDN"   # "SDN" (block/reject) or "PEP" (enhanced due diligence)
+    # "SDN" (block/reject) · "NON_SDN" (OFAC Consolidated — program-specific,
+    # review required) · "OTHER" (institution-supplied list — review required)
+    # · "PEP" (enhanced due diligence only)
+    list_type: str = "SDN"
 
 
 def _normalize(name: str | None) -> str:
@@ -87,8 +110,13 @@ def _build_indexes() -> None:
     _screen_cache.clear()
     for i, e in enumerate(_entries or []):
         norm = e["norm"]
-        if norm and norm not in _exact:
-            _exact[norm] = i
+        if norm:
+            prev = _exact.get(norm)
+            if prev is None or (
+                _SEVERITY.get(e.get("list_type", "SDN"), 0)
+                > _SEVERITY.get((_entries or [])[prev].get("list_type", "SDN"), 0)
+            ):
+                _exact[norm] = i
         grams = _trigrams(norm)
         _trigrams_per_entry.append(len(grams))
         for g in grams:
@@ -123,6 +151,25 @@ def _load() -> list[dict]:
         ]
 
     _entries = read(path, "OFAC SDN", "SDN")
+    if _CONSOLIDATED_LIST.exists():
+        cons = read(_CONSOLIDATED_LIST, "OFAC Consolidated (non-SDN)", "NON_SDN")
+        _entries += cons
+        log.info(f"Sanctions screening: loaded {len(cons)} OFAC Consolidated (non-SDN) entries")
+    if _EXTRA_LISTS_DIR.is_dir():
+        for extra in sorted(_EXTRA_LISTS_DIR.glob("*.json")):
+            rows = read(extra, extra.stem, "OTHER")
+            # An entry may declare its own list_type (e.g. a UN list an operator
+            # treats as blocking); read() applied the default, so re-honor it.
+            try:
+                declared = {r.get("name"): r.get("list_type") for r in json.loads(extra.read_text(encoding="utf-8"))}
+                for r in rows:
+                    lt = (declared.get(r["name"]) or "").upper()
+                    if lt in ("SDN", "NON_SDN", "OTHER", "PEP"):
+                        r["list_type"] = lt
+            except Exception:
+                pass
+            _entries += rows
+            log.info(f"Sanctions screening: loaded {len(rows)} entries from extra list {extra.name}")
     if _PEP_LIST.exists():
         pep = read(_PEP_LIST, "PEP list", "PEP")
         _entries += pep
@@ -141,43 +188,59 @@ def reload() -> int:
     return len(_load())
 
 
-def refresh_from_treasury() -> int:
-    """Download the live OFAC SDN + alias lists, rewrite data/ofac_sdn.json, and
-    reload. Blocking (run in an executor). Returns the new entry count; raises
-    on download failure (caller logs and keeps the current list)."""
+def _parse_ofac_csv(prim_raw: str, alt_raw: str, source: str) -> list[dict]:
+    """Parse an OFAC primary+alias CSV pair (sdn.csv/alt.csv or the Consolidated
+    cons_prim.csv/cons_alt.csv — same column layout) into screening entries."""
     import csv as _csv
     import io
-    import json as _json
-    import httpx
-
-    urls = {
-        "sdn": "https://www.treasury.gov/ofac/downloads/sdn.csv",
-        "alt": "https://www.treasury.gov/ofac/downloads/alt.csv",
-    }
-    raw = {}
-    with httpx.Client(follow_redirects=True, timeout=120) as client:
-        for key, url in urls.items():
-            raw[key] = client.get(url).raise_for_status().content.decode("latin-1")
 
     entries: list[dict] = []
     program_by_ent: dict[str, str] = {}
     _EMPTY = {"-0-", ""}
-    for row in _csv.reader(io.StringIO(raw["sdn"])):
+    for row in _csv.reader(io.StringIO(prim_raw)):
         if len(row) < 4 or row[1].strip() in _EMPTY:
             continue
         program_by_ent[row[0]] = row[3].strip()
         entries.append({"name": row[1].strip(),
                         "type": row[2].strip() if row[2].strip() not in _EMPTY else "",
                         "program": row[3].strip() if row[3].strip() not in _EMPTY else "",
-                        "source": "OFAC SDN"})
-    for row in _csv.reader(io.StringIO(raw["alt"])):
+                        "source": source})
+    for row in _csv.reader(io.StringIO(alt_raw)):
         if len(row) < 4 or row[3].strip() in _EMPTY:
             continue
         entries.append({"name": row[3].strip(), "type": "",
-                        "program": program_by_ent.get(row[0], ""), "source": "OFAC SDN (alias)"})
+                        "program": program_by_ent.get(row[0], ""), "source": f"{source} (alias)"})
+    return entries
 
-    _FULL_LIST.parent.mkdir(exist_ok=True)
-    _FULL_LIST.write_text(_json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+
+def refresh_from_treasury() -> int:
+    """Download the live OFAC SDN + alias lists (and, best-effort, the
+    Consolidated non-SDN lists), rewrite the data files, and reload. Blocking
+    (run in an executor). Returns the new entry count; raises on SDN download
+    failure (caller logs and keeps the current list). A Consolidated-list
+    failure is non-fatal — SDN screening must never be blocked by it."""
+    import json as _json
+    import httpx
+
+    with httpx.Client(follow_redirects=True, timeout=120) as client:
+        sdn_raw = client.get("https://www.treasury.gov/ofac/downloads/sdn.csv").raise_for_status().content.decode("latin-1")
+        alt_raw = client.get("https://www.treasury.gov/ofac/downloads/alt.csv").raise_for_status().content.decode("latin-1")
+        _FULL_LIST.parent.mkdir(exist_ok=True)
+        _FULL_LIST.write_text(
+            _json.dumps(_parse_ofac_csv(sdn_raw, alt_raw, "OFAC SDN"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        try:
+            cons_raw = client.get("https://www.treasury.gov/ofac/downloads/consolidated/cons_prim.csv").raise_for_status().content.decode("latin-1")
+            cons_alt_raw = client.get("https://www.treasury.gov/ofac/downloads/consolidated/cons_alt.csv").raise_for_status().content.decode("latin-1")
+            _CONSOLIDATED_LIST.write_text(
+                _json.dumps(_parse_ofac_csv(cons_raw, cons_alt_raw, "OFAC Consolidated (non-SDN)"), ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            log.warning(f"OFAC Consolidated (non-SDN) refresh failed (keeping current file): {e}")
+
     return reload()
 
 
@@ -241,7 +304,14 @@ def screen(name: str | None, threshold: float = DEFAULT_THRESHOLD) -> SanctionsM
         if not e["norm"]:
             continue
         score = _similarity(q, e["norm"])
-        if score >= threshold and (best is None or score > best.score):
+        if score < threshold:
+            continue
+        if (
+            best is None
+            or score > best.score
+            or (score == best.score
+                and _SEVERITY.get(e.get("list_type", "SDN"), 0) > _SEVERITY.get(best.list_type, 0))
+        ):
             best = _make_match(name, e, score)
 
     _screen_cache[cache_key] = best

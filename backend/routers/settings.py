@@ -14,7 +14,9 @@ Secrets (passwords, API keys) are never returned — GET reports only whether
 each is set. On save, empty secret fields mean "keep the current value".
 """
 import logging
+import os
 from datetime import datetime
+from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, Request
@@ -32,8 +34,12 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_admin)])
 
-_YAML_PATH = ROOT / "bank_config.yaml"
-_ENV_PATH = ROOT / ".env"
+# Persist to the SAME files this process loaded its config from — the
+# environment selectors (FMS_BANK_CONFIG / FMS_ENV_FILE, used by the prod/ and
+# test/ environments) must be honored here too, or an admin's settings change
+# would write to the root files and silently vanish on restart.
+_YAML_PATH = Path(os.getenv("FMS_BANK_CONFIG", "").strip() or (ROOT / "bank_config.yaml"))
+_ENV_PATH = Path(os.getenv("FMS_ENV_FILE", "").strip() or (ROOT / ".env"))
 
 # The normalized transaction fields a bank table can map columns onto.
 MAPPABLE_FIELDS = [
@@ -108,6 +114,8 @@ class SettingsUpdate(BaseModel):
     database: DatabaseSettings | None = None
     tables: dict | None = None             # full tables mapping as edited
     rules: dict | None = None              # detection-rule overrides (live-applied)
+    rules_rationale: str | None = None     # documented reason for the rule change (tuning log)
+    rules_backtest: dict | None = None     # backtest summary the admin ran before saving
     integrations: IntegrationsSettings | None = None
     directory: DirectorySettings | None = None
     monitoring: MonitoringSettings | None = None
@@ -313,10 +321,30 @@ async def _apply_settings(body: SettingsUpdate, actor: str, request: Request | N
     if body.rules is not None:
         existing_rules = data.setdefault("rules", {})
         existing_rules.update(body.rules)
-        # Applies live — the engine reads these at call time.
+        # Applies live — the engine reads these at call time. Every change is
+        # recorded in the tuning log (rule_changes) with before/after values and
+        # the documented rationale — the FFIEC's "documented and periodically
+        # reviewed" evidence.
         from backend.services import analyzer
+        before = analyzer.snapshot_rules()
         analyzer.apply_rule_overrides(existing_rules)
+        after = analyzer.snapshot_rules()
         bank_config["rules"] = dict(existing_rules)
+        if before != after:
+            try:
+                from backend.database import SessionLocal
+                from backend.models import RuleChange
+                async with SessionLocal() as _db:
+                    _db.add(RuleChange(
+                        changed_by=actor,
+                        old_values=before,
+                        new_values=after,
+                        rationale=(body.rules_rationale or "").strip() or None,
+                        backtest=body.rules_backtest,
+                    ))
+                    await _db.commit()
+            except Exception:
+                log.exception("Failed to write rule tuning-log entry")
 
     if body.monitoring is not None:
         mon = data.setdefault("monitoring", {})

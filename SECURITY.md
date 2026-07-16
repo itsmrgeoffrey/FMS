@@ -14,6 +14,14 @@ Do **not** open a public issue for security vulnerabilities. Report them private
 - **Protect the case store.** `fms.db` (SQLite) contains flagged transactions and analyst notes — restrict file permissions and back it up securely.
 - **Run on trusted infrastructure.** Terminate TLS in front of the API, restrict network access, and do not expose the backend directly to the public internet without an authenticating proxy.
 
+## Encryption at rest (deployment concern — by design)
+
+FMS does not implement its own storage encryption; it delegates to the layer built for it, which is how examiners expect it to be done:
+
+- **Server databases:** run the FMS application database on SQL Server or PostgreSQL with the engine's encryption (TDE / `pgcrypto`+volume encryption) and encrypted backups.
+- **SQLite deployments:** place `fms.db` (and `data/`) on an encrypted volume (BitLocker, LUKS, encrypted EBS).
+- **Why not in-app crypto?** Application-level encryption of its own SQLite file would protect against exactly one threat (file theft from an unencrypted disk) while breaking backups, inspection, and portability — full-disk/database-engine encryption covers that threat properly. This is a deliberate boundary, not an omission.
+
 ## Supported data flows
 
-FMS reads from your transaction database, stores case data locally, sends optional email alerts (SMTP), and calls a third-party LLM API for case summaries. Review these flows against your institution's data-handling policy before deploying.
+By default FMS makes **no external calls with transaction data**. The complete outbound surface, all optional: email alerts (SMTP, if configured), signed webhook callbacks to the URL you configure, OFAC list downloads from treasury.gov (list data in, nothing out), and — only if you enable AI summaries — an LLM endpoint, which can be your own self-hosted model so prose generation never leaves your infrastructure. Inbound: the push-ingestion API authenticates with `X-API-Key`. Review these flows against your institution's data-handling policy before deploying.
