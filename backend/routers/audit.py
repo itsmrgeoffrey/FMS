@@ -14,6 +14,27 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
+# Security-relevant actions, surfaced in the Security Events view. These are
+# ordinary audit records; this set just classifies which ones are security
+# signals (authentication, access control, sanctions, API-key abuse).
+SECURITY_ACTIONS = {
+    "LOGIN", "LOGIN_FAILED", "LOGIN_RATE_LIMITED", "SIGNUP",
+    "PASSWORD_CHANGED", "PASSWORD_RESET_REQUESTED", "USER_PASSWORD_RESET",
+    "USER_CREATED", "USER_ROLE_CHANGED", "USER_ENABLED", "USER_DISABLED",
+    "INGEST_KEY_REJECTED", "SANCTIONS_HIT",
+}
+
+# Visual emphasis in the UI. Anything unlisted is treated as "info".
+SECURITY_SEVERITY = {
+    "SANCTIONS_HIT": "critical",
+    "LOGIN_FAILED": "warning",
+    "LOGIN_RATE_LIMITED": "warning",
+    "INGEST_KEY_REJECTED": "warning",
+    "USER_DISABLED": "notice",
+    "USER_ROLE_CHANGED": "notice",
+    "USER_PASSWORD_RESET": "notice",
+}
+
 
 async def record(username: str, action: str, target: str | None = None,
                  detail: str | None = None, request: Request | None = None) -> None:
@@ -43,6 +64,40 @@ async def list_audit(
     if username:
         q = q.where(AuditLog.username == username)
     return list((await db.execute(q)).scalars().all())
+
+
+@router.get("/security")
+async def list_security_events(
+    limit: int = Query(100, ge=1, le=500),
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Security-relevant events only — sign-ins and failures, rate-limiting,
+    rejected ingestion API keys, OFAC sanctions hits, and account/role changes.
+    Powers the Security Events view. Admin-only."""
+    rows = list((await db.execute(
+        select(AuditLog)
+        .where(AuditLog.action.in_(SECURITY_ACTIONS))
+        .order_by(AuditLog.created_at.desc())
+        .limit(limit)
+    )).scalars().all())
+    counts = {
+        "failed_logins": sum(1 for r in rows if r.action == "LOGIN_FAILED"),
+        "rejected_keys": sum(1 for r in rows if r.action == "INGEST_KEY_REJECTED"),
+        "sanctions_hits": sum(1 for r in rows if r.action == "SANCTIONS_HIT"),
+    }
+    return {
+        "counts": counts,
+        "events": [
+            {
+                "id": r.id, "username": r.username, "action": r.action,
+                "severity": SECURITY_SEVERITY.get(r.action, "info"),
+                "target": r.target, "detail": r.detail, "ip": r.ip,
+                "created_at": str(r.created_at),
+            }
+            for r in rows
+        ],
+    }
 
 
 @router.get("/users")

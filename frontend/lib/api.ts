@@ -141,6 +141,8 @@ export const api = {
     req(`/audit?limit=${limit}${username ? `&username=${encodeURIComponent(username)}` : ""}`),
   getAuditUsers: (): Promise<{ username: string; actions: number; failed_logins: number; case_actions: number; last_activity: string | null }[]> =>
     req("/audit/users"),
+  getSecurityEvents: (limit = 100): Promise<SecurityEventsResponse> =>
+    req(`/audit/security?limit=${limit}`),
 
   // Account + user management
   changePassword: (current_password: string, new_password: string): Promise<{ changed: boolean }> =>
@@ -209,4 +211,22 @@ export interface ApprovalsPage {
   me: string;
   pending: Approval[];
   recent: Approval[];
+}
+
+export type SecuritySeverity = "critical" | "warning" | "notice" | "info";
+
+export interface SecurityEvent {
+  id: number;
+  username: string;
+  action: string;
+  severity: SecuritySeverity;
+  target: string | null;
+  detail: string | null;
+  ip: string | null;
+  created_at: string;
+}
+
+export interface SecurityEventsResponse {
+  counts: { failed_logins: number; rejected_keys: number; sanctions_hits: number };
+  events: SecurityEvent[];
 }

@@ -97,6 +97,7 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     from backend.auth import client_ip
     ip = client_ip(request) or "unknown"
     if _rate_limited(ip):
+        await audit.record(_normalize_email(body.email) or "unknown", "LOGIN_RATE_LIMITED", request=request)
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again in a few minutes.")
 
     email = _normalize_email(body.email)

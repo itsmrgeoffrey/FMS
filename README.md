@@ -120,6 +120,15 @@ Currency-aware CTR/SAR thresholds live in `backend/services/analyzer.py` and are
 
 FMS handles sensitive financial data. Use a **read-only** database user, set `FMS_API_KEY` in any shared/production deployment, keep `.env` and `bank_config.yaml` out of version control (already git-ignored), and run it on trusted infrastructure. See [SECURITY.md](SECURITY.md).
 
+### Logging & observability
+
+Application logs go through Python's standard `logging`, controlled entirely by environment variables — no code change to move between environments:
+
+- **`FMS_LOG_LEVEL`** — `DEBUG` / `INFO` / `WARNING` / `ERROR` (default `INFO`).
+- **`FMS_LOG_FILE`** — path to a **rotating** log file so operational history survives restarts; unset = console only. Tune with `FMS_LOG_MAX_BYTES` / `FMS_LOG_BACKUP_COUNT`. (The demo logs to console; the private `prod/` env writes to `prod/logs/fms.log`.)
+
+Every push-ingestion call is assigned a **request id**, logged end-to-end with latency and returned as the `X-Request-ID` response header, so a single transaction can be traced through the logs. Separately, **security-relevant events** — sign-ins and failures, login rate-limiting, rejected ingestion keys, OFAC hits, and account/role changes — are recorded and surfaced under **Audit & Security → Security events** (admin only). That is distinct from the per-case compliance audit trail (who worked each case).
+
 ## Contributing
 
 Contributions welcome — new database adapters, additional detection signals, and jurisdiction thresholds especially. See [CONTRIBUTING.md](CONTRIBUTING.md).

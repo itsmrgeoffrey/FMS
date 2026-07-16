@@ -16,7 +16,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +27,7 @@ from backend.auth import require_case_action
 from backend.config import bank_config, settings
 from backend.database import get_db, SessionLocal
 from backend.models import FraudCase, IngestedTransaction, User
+from backend.routers import audit
 from backend.services import analyzer, callbacks, emailer, sanctions
 from backend.services.broadcaster import broadcaster
 
@@ -34,11 +35,18 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
-async def require_ingest_key(x_api_key: str | None = Header(default=None)) -> None:
+async def require_ingest_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
     key = (settings.fms_ingest_api_key or settings.fms_api_key).strip()
     if not key:
         raise HTTPException(status_code=503, detail="Ingestion disabled: set FMS_INGEST_API_KEY on the server first")
     if x_api_key != key:
+        # Record rejected ingestion attempts as a security event — a burst of
+        # these is a sign someone is probing the endpoint.
+        await audit.record(
+            "api-client", "INGEST_KEY_REJECTED",
+            detail="missing X-API-Key" if not x_api_key else "invalid X-API-Key",
+            request=request,
+        )
         raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
 
 
@@ -136,6 +144,14 @@ async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
         except IntegrityError:
             await wdb.rollback()
             raise HTTPException(status_code=409, detail="external_id already ingested")
+
+    # An OFAC match is a reportable security event in its own right — record it
+    # so it shows in the Security Events view regardless of case disposition.
+    if case.sanctions_hit:
+        await audit.record(
+            "ingest", "SANCTIONS_HIT", target=case.account_id,
+            detail=(case.sanctions_detail or "OFAC match")[:490],
+        )
 
     if result.is_fraudulent:
         payload = {

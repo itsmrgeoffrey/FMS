@@ -9,6 +9,8 @@ fms.db
 node_modules/
 .next/
 *.log
+*.log.*
+logs/
 
 # Local tooling / editor config
 .claude/
