@@ -16,7 +16,7 @@ router = APIRouter(tags=["insights"])
 OPEN_STATUSES = ("OPEN", "UNDER_REVIEW")
 
 # FinCEN National AML/CFT Priorities (June 30, 2021 — the operative set, which
-# the 2026 AML/CFT Program rule proposal requires institutions to incorporate
+# the 2026 AML/CFT Program rule proposal would require institutions to incorporate
 # into their risk assessments) mapped honestly to FMS coverage. "direct" =
 # detection signals target it; "partial" = FMS surfaces the money-movement
 # mechanics but predicate-crime attribution is human work; "screening" =

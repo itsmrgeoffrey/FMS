@@ -116,7 +116,7 @@ class PendingApproval(Base):
 
 class RiskAssessment(Base):
     """Versioned institutional ML/TF risk assessment — the documented artifact
-    FinCEN's 2026 AML/CFT Program rule proposal requires. FMS structures the
+    FinCEN's 2026 AML/CFT Program rule proposal would require. FMS structures the
     assessment (category grid, National-Priorities checklist) and pre-populates
     the activity snapshot from its own data ('reports filed' consideration);
     the RATINGS and judgments are the institution's — FMS never auto-rates."""
