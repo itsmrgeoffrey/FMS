@@ -1,6 +1,7 @@
 import logging
 import os
 from pathlib import Path
+from urllib.parse import quote_plus, unquote_plus
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -19,7 +20,34 @@ load_dotenv(os.getenv("FMS_ENV_FILE", "").strip() or str(Path(__file__).parent.p
 DB_PATH = Path(os.getenv("FMS_DB_PATH", "") or Path(__file__).parent.parent / "fms.db")
 DATABASE_URL = os.getenv("FMS_APP_DB_URL", "").strip() or f"sqlite+aiosqlite:///{DB_PATH}"
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+
+def _ensure_mars(url: str) -> str:
+    """SQL Server rejects overlapping result sets on a pooled connection unless
+    Multiple Active Result Sets is enabled — surfacing as intermittent
+    '[ODBC Driver 17 for SQL Server]Connection is busy with results for another
+    command' 500s on endpoints that issue several queries (e.g. the dashboard).
+    Enable MARS automatically for mssql+aioodbc URLs so every SQL Server
+    deployment is correct without hand-editing the connection string. Idempotent;
+    only touches the standard `?odbc_connect=` form and leaves other URLs alone."""
+    if not url.lower().startswith("mssql") or "odbc_connect=" not in url:
+        return url
+    prefix, encoded = url.split("odbc_connect=", 1)
+    if "&" in encoded:  # odbc_connect not the sole/last param — don't risk mangling
+        return url
+    conn_str = unquote_plus(encoded)
+    if "mars_connection" in conn_str.lower():
+        return url
+    conn_str = conn_str.rstrip(";") + ";MARS_Connection=Yes;"
+    log.info("Enabled MARS for SQL Server connection (prevents 'connection is busy' errors)")
+    return prefix + "odbc_connect=" + quote_plus(conn_str)
+
+
+DATABASE_URL = _ensure_mars(DATABASE_URL)
+
+# pool_pre_ping avoids the other common server-DB failure mode: a pooled
+# connection dropped by the server (idle timeout / restart) being handed to a
+# request. Harmless for SQLite.
+engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
