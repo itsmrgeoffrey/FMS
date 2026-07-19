@@ -1,20 +1,37 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# FMS bank connection config — copy to bank_config.yaml and fill in.
+# FMS bank config — copy to bank_config.yaml and fill in.
 # bank_config.yaml is git-ignored so your real credentials never get committed.
 #
-# FMS connects to your core banking / transaction database READ-ONLY and never
-# writes to it. Create a dedicated read-only DB user for this.
+# THERE ARE TWO WAYS TO FEED FMS TRANSACTIONS — you only need ONE:
+#
+#   1. API-PUSH  (recommended; no database access)
+#        Your systems POST transactions to /ingest/transactions and get the risk
+#        verdict back. You do NOT need the `database`/`tables` blocks below —
+#        set  monitoring.mode: api  (or omit bank_config.yaml entirely; FMS
+#        starts in API-push mode by default).
+#
+#   2. DATABASE-POLL  (on-prem; FMS reads your core banking DB READ-ONLY)
+#        Fill in `database` + `tables` and set  monitoring.mode: poll.
+#        Create a dedicated READ-ONLY DB user — FMS never writes to your database.
 # ─────────────────────────────────────────────────────────────────────────────
 
+monitoring:
+  mode: poll                 # "poll" = read the database below · "api" = push ingestion (no DB needed)
+  poll_interval_seconds: 30
+  history_days: 90           # days of per-account history used as the behavioural baseline
+
+# ── Database — DB-POLL mode only (ignored when mode: api) ─────────────────────
 database:
-  type: mysql              # "mysql" or "mssql"
+  type: mysql              # mysql | mssql | postgres | oracle
   host: localhost
-  port: 3306
+  port: 3306               # mysql 3306 · mssql 1433 · postgres 5432 · oracle 1521
   user: fraud_monitor_reader
   password: your_password_here
   database: bank_core
-  # For MSSQL with Windows Authentication, set: trusted_connection: true
+  # MSSQL with Windows Authentication: set  trusted_connection: true
+  # postgres/oracle use the same fields; just change `type` and `port`.
 
+# ── Column mapping — DB-POLL mode only ───────────────────────────────────────
 tables:
   # Define inward, outward, or both depending on your schema.
   # Each section is optional — omit ones that don't apply.
@@ -49,10 +66,6 @@ tables:
       status: txn_status
       # batch_id: batch_id
 
-monitoring:
-  poll_interval_seconds: 30
-  history_days: 90                     # days of per-account history used as behavioural baseline
-
 # Optional — used to pre-fill the filing-institution section of FinCEN
 # CTR (Form 112) / SAR (Form 111) export worksheets (/reports/*?format=fincen).
 institution:
@@ -64,3 +77,10 @@ institution:
   zip: ""
   primary_regulator: ""                # e.g. FDIC, OCC, NCUA, FRB
 
+# Optional — these are easiest to configure from the Administration UI, but can
+# be set here too. Uncomment and fill in to enable.
+# integrations:
+#   callback_url: ""                   # your endpoint for signed case.flagged / case.disposition events
+#   callback_secret: ""                # shared HMAC secret; your receiver verifies the X-FMS-Signature header
+# directory:
+#   enabled: false                     # set true + configure to federate sign-in to LDAP / Active Directory

@@ -114,7 +114,7 @@ On first run FMS records a checkpoint and begins monitoring transactions created
 
 ## Configuration
 
-- **`bank_config.yaml`** — database connection + a column mapping from your schema to FMS's normalized fields, plus poll interval and history window. See [`bank_config.example.yaml`](bank_config.example.yaml).
+- **`bank_config.yaml`** — selects the ingestion mode (`monitoring.mode`). In **API-push** mode (the default, recommended) you don't need this file at all — transactions arrive via `POST /ingest/transactions` and no database block is required. In **database-poll** mode it holds the read-only DB connection and a column mapping from your schema to FMS's normalized fields (MySQL / SQL Server / PostgreSQL / Oracle). Copy [`bank_config.example.yaml`](bank_config.example.yaml), which documents both modes. It is git-ignored so real credentials never get committed.
 - **`.env`** — `GROQ_API_KEY` (case summaries), optional `GMAIL_USER` / `GMAIL_APP_PASSWORD` / `ALERT_EMAIL` (alerts), and optional `FMS_API_KEY` (API auth).
 
 Currency-aware CTR/SAR thresholds live in `backend/services/analyzer.py` and are easy to extend for new jurisdictions.
