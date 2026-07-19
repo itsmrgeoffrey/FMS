@@ -136,13 +136,25 @@ Every push-ingestion call is assigned a **request id**, logged end-to-end with l
 
 Contributions welcome — new database adapters, additional detection signals, and jurisdiction thresholds especially. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Whitepaper
+## Documentation
 
-The design rationale — the compliance gap, why determinism over black boxes, the detection methodology, security model, and honest limitations — is written up in [docs/WHITEPAPER.md](docs/WHITEPAPER.md).
+Written so a compliance officer, examiner, or bank IT reviewer can find every answer without reading code:
 
-## User manual
-
-A full operator's manual — sign-in, roles, working cases, reports, administration, and troubleshooting — is in [docs/USER_MANUAL.md](docs/USER_MANUAL.md).
+| You want | Read |
+|---|---|
+| **Architecture** — components, data flows, trust boundaries | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **Risk engine** — every threshold and rule, with regulatory basis and testing evidence | [MODEL.md](MODEL.md) |
+| **Rule engine** — live config, tuning log, backtesting | [MODEL.md](MODEL.md) · [docs/API.md](docs/API.md#detection-rules--tuning) |
+| **Deployment guide** — modes, full env-var reference, Docker, production checklist | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| **API documentation** — auth, endpoints, webhook contract + HMAC verification | [docs/API.md](docs/API.md) (live spec at `/docs`) |
+| **Database schema** — every table, field groups, retention behavior | [docs/SCHEMA.md](docs/SCHEMA.md) |
+| **Audit logging** — full event catalog, severities, access control | [docs/AUDIT_LOGGING.md](docs/AUDIT_LOGGING.md) |
+| **RBAC design** — role matrix, dual control (maker-checker), bootstrap, LDAP/AD | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#rbac-design) |
+| **OFAC integration** — SDN vs Consolidated vs PEP treatment, list refresh, 50%-rule boundary | [COMPLIANCE.md](COMPLIANCE.md#ofac-sanctions-screening) |
+| **Regulatory mapping** — CTR/SAR/314(a)/retention/National Priorities, with citations | [COMPLIANCE.md](COMPLIANCE.md) |
+| **Design rationale & honest limitations** — the whitepaper | [docs/WHITEPAPER.md](docs/WHITEPAPER.md) |
+| **Operator manual** — sign-in, roles, working cases, reports, administration | [docs/USER_MANUAL.md](docs/USER_MANUAL.md) |
+| **Security policy & data flows** | [SECURITY.md](SECURITY.md) |
 
 ## Methodology
 
