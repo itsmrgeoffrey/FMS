@@ -20,8 +20,13 @@ COPY backend/ backend/
 COPY scripts/ scripts/
 COPY data/ofac_sdn.sample.json data/ofac_sdn.sample.json
 
-# Case store lives on a volume (see docker-compose.yml)
+# Case store lives on a volume (see docker-compose.yml). Create the mount point
+# so the app still boots on a fresh host before a volume is attached — the data
+# is just ephemeral until you attach one.
 ENV FMS_DB_PATH=/data/fms.db
+RUN mkdir -p /data
 
 EXPOSE 8002
-CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8002"]
+# Bind Railway's assigned $PORT when present (its router health-probes that
+# port); fall back to 8002 for local Docker / docker-compose.
+CMD ["sh", "-c", "python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8002}"]
