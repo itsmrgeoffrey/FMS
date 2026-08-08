@@ -6,6 +6,9 @@ __pycache__/
 .venv/
 venv/
 fms.db
+fms_demo.db
+*.db-wal
+*.db-shm
 node_modules/
 .next/
 *.log

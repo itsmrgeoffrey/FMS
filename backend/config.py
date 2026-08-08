@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     setup_token: str = os.getenv("FMS_SETUP_TOKEN", "")
     # Only trust X-Forwarded-For when the app is behind a trusted reverse proxy.
     trust_x_forwarded_for: bool = os.getenv("FMS_TRUST_X_FORWARDED_FOR", "false").strip().lower() in ("1", "true", "yes", "on")
+    # Browser origins allowed for CORS (REST) and WebSocket handshakes.
+    # Comma-separated. Defaults to local dev; in production set FMS_CORS_ORIGINS
+    # to your deployed frontend origin(s), e.g. "https://fms.up.railway.app".
+    cors_origins: str = os.getenv("FMS_CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
 
     class Config:
         env_file = ROOT / ".env"
@@ -68,6 +72,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Parsed allow-list shared by the CORS middleware (backend/main.py) and the
+# WebSocket origin check (backend/routers/ws.py).
+CORS_ORIGINS: list[str] = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 
 if not settings.auth_secret:
     settings.auth_secret = secrets.token_hex(32)

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import settings as app_settings
+from backend.config import settings as app_settings, CORS_ORIGINS
 from backend.database import init_db
 from backend.logging_config import request_id_var, setup_logging
 from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest, risk
@@ -90,7 +90,7 @@ app = FastAPI(title="FMS — Fraud Monitoring System", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,10 +1,11 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from backend.auth import _verify_token
+from backend.config import CORS_ORIGINS
 from backend.services.broadcaster import broadcaster
 
 router = APIRouter()
 
-_ALLOWED_ORIGINS = {"http://localhost:3000", "http://localhost:3001"}
+_ALLOWED_ORIGINS = set(CORS_ORIGINS)
 
 
 @router.websocket("/ws")

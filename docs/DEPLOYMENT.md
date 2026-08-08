@@ -44,7 +44,10 @@ A clean environment split is simply two launch scripts exporting different `FMS_
 | `GMAIL_USER` / `GMAIL_APP_PASSWORD` / `ALERT_EMAIL` | — | Optional email alerts |
 | `ALERT_WEBHOOK_URL` | — | Optional alert webhook |
 | `FMS_TRUST_X_FORWARDED_FOR` | `false` | Set `true` only behind a proxy you control (audit-log IPs) |
+| `FMS_CORS_ORIGINS` | `localhost:3000,3001` | Comma-separated browser origins allowed for CORS **and** the WebSocket handshake — set to your deployed frontend origin |
 | `FMS_ENV` | — | Environment label shown in system info |
+| `BACKEND_URL` *(frontend)* | `http://localhost:8002` | Where the Next.js server proxies `/api/*`; set to the backend's URL in a split deployment |
+| `NEXT_PUBLIC_WS_URL` *(frontend, build-time)* | *(none → local `:8002`)* | Browser live-feed WebSocket endpoint, e.g. `wss://backend.example.com/ws` |
 
 ## 3. Run it
 
