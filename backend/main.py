@@ -1,11 +1,14 @@
 import asyncio
 import logging
+import os
 import time
 import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.config import settings as app_settings, CORS_ORIGINS
 from backend.database import init_db
@@ -133,6 +136,51 @@ async def security_headers(request, call_next):
     # Instructs browsers to keep using HTTPS once served over it (no effect on plain HTTP).
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return resp
+
+
+# ─── Abuse protection: request-body size limit + ingestion rate limiting ─────
+_MAX_BODY_BYTES = int(os.getenv("FMS_MAX_BODY_BYTES", str(5 * 1024 * 1024)))  # 5 MB
+_INGEST_HITS: dict[str, list[float]] = defaultdict(list)
+_INGEST_MAX = int(os.getenv("FMS_INGEST_RATE_MAX", "120"))   # requests per IP per minute
+_INGEST_WINDOW = 60.0
+
+
+def _client_key(request) -> str:
+    if app_settings.trust_x_forwarded_for:
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def limit_body_size(request, call_next):
+    """Reject oversized request bodies — a cheap DoS guard. Chunked uploads with
+    no Content-Length bypass this, but the app's inputs are small JSON anyway."""
+    cl = request.headers.get("content-length")
+    if cl:
+        try:
+            if int(cl) > _MAX_BODY_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        except ValueError:
+            pass
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def rate_limit_ingest(request, call_next):
+    """Per-IP rate limit on the push-ingestion endpoints, on top of the API key —
+    contains a compromised or runaway key. Login has its own throttle."""
+    if request.url.path.startswith("/ingest"):
+        key = _client_key(request)
+        now = time.time()
+        hits = [t for t in _INGEST_HITS[key] if now - t < _INGEST_WINDOW]
+        if len(hits) >= _INGEST_MAX:
+            _INGEST_HITS[key] = hits
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded — slow down."})
+        hits.append(now)
+        _INGEST_HITS[key] = hits
+    return await call_next(request)
 
 app.include_router(cases.router)
 app.include_router(stats.router)
