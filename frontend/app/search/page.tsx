@@ -35,12 +35,12 @@ function SearchResults() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Search</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Search</h1>
         <p className="text-sm text-gray-500 mt-1">
           {q ? <>Results for <span className="font-medium text-gray-700">&ldquo;{q}&rdquo;</span></> : "Type in the sidebar search box and press Enter."}
         </p>
       </div>
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <tbody className={loading ? "opacity-50" : ""}>
             {!loading && items.length === 0 && (

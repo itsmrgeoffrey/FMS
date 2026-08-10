@@ -14,9 +14,9 @@ function money(a: number, c: string) {
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
+    <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-4">
       <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">{label}</p>
-      <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+      <p className="text-2xl font-semibold tracking-tight text-gray-900 mt-1">{value}</p>
       {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
     </div>
   );
@@ -42,7 +42,7 @@ export default function AnalyticsPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Analytics</h1>
         <p className="text-sm text-gray-500 mt-1">Key indicators and breakdowns across all analyzed activity.</p>
       </div>
 
@@ -67,15 +67,15 @@ export default function AnalyticsPage() {
 
       {/* Filing obligations */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500 uppercase">CTRs required</p><p className="text-2xl font-bold text-gray-900 mt-1">{d.totals.ctr_required}</p></div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500 uppercase">SARs open</p><p className="text-2xl font-bold text-gray-900 mt-1">{d.totals.sar_open}</p></div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500 uppercase">Sanctions hits</p><p className="text-2xl font-bold text-gray-900 mt-1">{d.totals.sanctions_hits}</p></div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500 uppercase">Confirmed fraud</p><p className="text-2xl font-bold text-gray-900 mt-1">{d.totals.confirmed_fraud}</p></div>
+        <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-4"><p className="text-xs text-gray-500 uppercase">CTRs required</p><p className="text-2xl font-semibold tracking-tight text-gray-900 mt-1">{d.totals.ctr_required}</p></div>
+        <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-4"><p className="text-xs text-gray-500 uppercase">SARs open</p><p className="text-2xl font-semibold tracking-tight text-gray-900 mt-1">{d.totals.sar_open}</p></div>
+        <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-4"><p className="text-xs text-gray-500 uppercase">Sanctions hits</p><p className="text-2xl font-semibold tracking-tight text-gray-900 mt-1">{d.totals.sanctions_hits}</p></div>
+        <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-4"><p className="text-xs text-gray-500 uppercase">Confirmed fraud</p><p className="text-2xl font-semibold tracking-tight text-gray-900 mt-1">{d.totals.confirmed_fraud}</p></div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Fraud type share */}
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-4">Fraud type distribution</h2>
           {d.fraud_types.length === 0 ? <p className="text-sm text-gray-400">No flagged cases.</p> : (
             <div className="space-y-3">
@@ -93,7 +93,7 @@ export default function AnalyticsPage() {
         </section>
 
         {/* Risk distribution */}
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-4">Risk distribution</h2>
           <div className="flex h-4 rounded-full overflow-hidden mb-3">
             {d.risk_levels.filter((r) => r.count > 0).map((r) => (
@@ -111,7 +111,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Activity trend */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">Activity — last 14 days</h2>
         <div className="flex items-end gap-1.5 h-36">
           {d.activity.map((x) => {

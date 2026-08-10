@@ -42,7 +42,7 @@ function Section({
   badge?: string;
 }) {
   return (
-    <section className="bg-white rounded-lg border border-gray-200 p-5">
+    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-sm font-semibold text-gray-700 inline-flex items-center gap-2">
@@ -94,7 +94,7 @@ function MyAccountSection() {
   }
 
   return (
-    <section className="bg-white rounded-lg border border-gray-200 p-5">
+    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-sm font-semibold text-gray-700">My Account</h2>
@@ -204,7 +204,7 @@ function UsersSection() {
     {approvals && (
       <ApprovalsSection approvals={approvals} onChanged={load} onTemp={setTemp} />
     )}
-    <section className="bg-white rounded-lg border border-gray-200 p-5">
+    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-gray-700">Users</h2>
         <p className="text-xs text-gray-400 mt-0.5">
@@ -367,7 +367,7 @@ function ApprovalsSection({
   }
 
   return (
-    <section className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
+    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5 mb-6">
       <div className="mb-3 flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-sm font-semibold text-gray-700">Pending Approvals (dual control)</h2>
@@ -464,7 +464,7 @@ function ApprovalsSection({
 
 function ComingSoon({ title, blurb, planned }: { title: string; blurb: string; planned: string[] }) {
   return (
-    <section className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-8 text-center">
       <div className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500 mb-3">
         Planned
       </div>
@@ -573,7 +573,7 @@ export default function SettingsPage() {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">My Account</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">My Account</h1>
           <p className="text-sm text-gray-500 mt-1">Manage your password.</p>
         </div>
         <MyAccountSection />
@@ -599,7 +599,7 @@ export default function SettingsPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Administration</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Administration</h1>
         <p className="text-sm text-gray-500 mt-1">Manage system configuration, users, and access.</p>
       </div>
 
@@ -726,7 +726,7 @@ export default function SettingsPage() {
               Trust server certificate
             </label>
             <button type="button" disabled title="Coming soon"
-              className="mt-1 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-300 cursor-not-allowed inline-flex items-center gap-1">
+              className="mt-1 text-xs px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-300 cursor-not-allowed inline-flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
               Upload SSL Certificate (coming soon)
             </button>
@@ -746,7 +746,7 @@ export default function SettingsPage() {
             type="button"
             onClick={testConnection}
             disabled={testing}
-            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="text-sm font-medium px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             {testing ? "Testing…" : "Test Connection"}
           </button>
@@ -958,7 +958,7 @@ export default function SettingsPage() {
       </Section>
 
       {/* System information */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">System Information</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <div><p className="text-xs text-gray-400">Application version</p><p className="text-gray-800 font-medium">{sysInfo?.app_version ?? "—"}</p></div>
@@ -977,7 +977,7 @@ export default function SettingsPage() {
       </section>
 
       {/* Security best practices */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-3">Security</h2>
         <ul className="space-y-1.5 text-sm text-gray-600">
           {[
@@ -996,7 +996,7 @@ export default function SettingsPage() {
       </section>
 
       {/* Configuration activity log */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-1">Recent configuration changes</h2>
         <p className="text-xs text-gray-400 mb-4">Who changed what, and when — from the Audit Trail.</p>
         {activity.length === 0 ? (
@@ -1086,7 +1086,7 @@ export default function SettingsPage() {
             <div className="mt-4 flex items-center gap-3">
               <button type="button" disabled={dirTesting}
                 onClick={async () => { setDirTesting(true); setDirTest(null); try { setDirTest(await api.testDirectory()); } catch (e) { setDirTest({ connected: false, message: String(e) }); } finally { setDirTesting(false); } }}
-                className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                className="text-sm font-medium px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">
                 {dirTesting ? "Testing…" : "Test Directory Connection"}
               </button>
               {dirTest && <span className={`text-sm ${dirTest.connected ? "text-green-600" : "text-red-600"}`}>{dirTest.connected ? "✓ " : "✗ "}{dirTest.message}</span>}
@@ -1145,7 +1145,7 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Inbound ingestion</h2>
           <p className="text-sm text-gray-600">
             Your system POSTs each transaction to <code className="font-mono text-xs bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">/ingest/transactions</code> with

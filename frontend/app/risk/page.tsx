@@ -96,8 +96,8 @@ export default function RiskPage() {
   if (!assessment) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900">Risk Assessment</h1>
-        <div className="mt-6 bg-white rounded-lg border border-gray-200 p-8 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Risk Assessment</h1>
+        <div className="mt-6 bg-white rounded-xl border border-gray-200/80 shadow-sm p-8 text-center">
           <p className="text-sm text-gray-600 max-w-xl mx-auto">
             A documented institutional ML/TF risk assessment — covering your products, customers, geographies,
             channels, the FinCEN National AML/CFT Priorities, and the reports you file — is the foundation of a
@@ -129,9 +129,9 @@ export default function RiskPage() {
           {editable ? (
             <input value={assessment.title}
               onChange={(e) => setAssessment({ ...assessment, title: e.target.value })}
-              className="text-2xl font-bold text-gray-900 border-b border-transparent hover:border-gray-200 focus:border-blue-400 focus:outline-none bg-transparent w-full max-w-xl" />
+              className="text-2xl font-semibold tracking-tight text-gray-900 border-b border-transparent hover:border-gray-200 focus:border-blue-400 focus:outline-none bg-transparent w-full max-w-xl" />
           ) : (
-            <h1 className="text-2xl font-bold text-gray-900">{assessment.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-gray-900">{assessment.title}</h1>
           )}
           <p className="text-sm text-gray-500 mt-1">
             Version {assessment.version} ·{" "}
@@ -171,7 +171,7 @@ export default function RiskPage() {
       {notice && <p className="text-sm text-green-700">{notice}</p>}
 
       {/* Activity snapshot */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-1">Activity snapshot (from FMS data)</h2>
         <p className="text-xs text-gray-400 mb-4">
           The &quot;reports filed&quot; consideration — generated {snap.generated_at ? new Date(snap.generated_at + "Z").toLocaleString() : "—"}.
@@ -182,7 +182,7 @@ export default function RiskPage() {
             ["CTRs required", snap.ctr_required], ["Sanctions hits", snap.sanctions_hits], ["Accounts seen", snap.distinct_accounts_seen],
           ] as const).map(([label, value]) => (
             <div key={label} className="border border-gray-100 rounded-lg p-3">
-              <p className="text-2xl font-bold text-gray-900">{Number(value ?? 0).toLocaleString()}</p>
+              <p className="text-2xl font-semibold tracking-tight text-gray-900">{Number(value ?? 0).toLocaleString()}</p>
               <p className="text-xs text-gray-400 mt-1">{label}</p>
             </div>
           ))}
@@ -196,7 +196,7 @@ export default function RiskPage() {
 
       {/* Category grid */}
       {Object.entries(areas).map(([area, rows]) => (
-        <section key={area} className="bg-white rounded-lg border border-gray-200 p-5">
+        <section key={area} className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">{area}</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -246,7 +246,7 @@ export default function RiskPage() {
       ))}
 
       {/* National priorities */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-1">FinCEN National AML/CFT Priorities</h2>
         <p className="text-xs text-gray-400 mb-4">
           Mark which priorities are relevant to your institution&apos;s risk profile. FMS&apos;s detection coverage for each is shown honestly — &quot;partial&quot; means FMS surfaces the money-movement mechanics and your officer attributes them.
@@ -289,7 +289,7 @@ export default function RiskPage() {
       </section>
 
       {/* Conclusion */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <h2 className="text-sm font-semibold text-gray-700">Overall assessment</h2>
           <div className="flex items-center gap-2">
@@ -320,7 +320,7 @@ export default function RiskPage() {
 
       {/* Versions */}
       {versions.length > 1 && (
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">Version history</h2>
           {versions.map((v) => (
             <div key={v.id} className="flex flex-wrap justify-between gap-2 text-sm py-1.5 border-b border-gray-50 last:border-0">

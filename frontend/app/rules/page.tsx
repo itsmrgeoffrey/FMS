@@ -86,14 +86,14 @@ export default function RulesPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Rule Engine</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Rule Engine</h1>
         <p className="text-sm text-gray-500 mt-1">
           The detection engine is fully deterministic and explainable — every flag traces to these rules. No black box.
         </p>
       </div>
 
       {/* Regulatory thresholds */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-1">Regulatory thresholds</h2>
         <p className="text-xs text-gray-400 mb-4">{cfg.regulatory_thresholds.note}</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -110,26 +110,26 @@ export default function RulesPage() {
       </section>
 
       {/* Detection parameters */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">Detection windows</h2>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div className="border border-gray-100 rounded-lg p-3">
-            <p className="text-2xl font-bold text-gray-900">{Math.round(cfg.detection_parameters.structuring_band_ratio * 100)}%</p>
+            <p className="text-2xl font-semibold tracking-tight text-gray-900">{Math.round(cfg.detection_parameters.structuring_band_ratio * 100)}%</p>
             <p className="text-xs text-gray-400 mt-1">structuring band (of threshold)</p>
           </div>
           <div className="border border-gray-100 rounded-lg p-3">
-            <p className="text-2xl font-bold text-gray-900">{cfg.detection_parameters.rolling_window_days}d</p>
+            <p className="text-2xl font-semibold tracking-tight text-gray-900">{cfg.detection_parameters.rolling_window_days}d</p>
             <p className="text-xs text-gray-400 mt-1">velocity window</p>
           </div>
           <div className="border border-gray-100 rounded-lg p-3">
-            <p className="text-2xl font-bold text-gray-900">{cfg.detection_parameters.smurfing_window_hours}h</p>
+            <p className="text-2xl font-semibold tracking-tight text-gray-900">{cfg.detection_parameters.smurfing_window_hours}h</p>
             <p className="text-xs text-gray-400 mt-1">smurfing window</p>
           </div>
         </div>
       </section>
 
       {/* Scoring components */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">Scoring components</h2>
         <div className="space-y-2">
           {cfg.scoring_components.map((c) => (
@@ -148,7 +148,7 @@ export default function RulesPage() {
 
       {/* Risk levels + sanctions */}
       <div className="grid md:grid-cols-2 gap-6">
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">Risk levels</h2>
           {cfg.risk_levels.map((r) => (
             <div key={r.level} className="flex justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
@@ -157,7 +157,7 @@ export default function RulesPage() {
             </div>
           ))}
         </section>
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Sanctions screening</h2>
           <p className="text-sm text-gray-700">{cfg.sanctions.list}</p>
           <p className="text-xs text-gray-500 mt-1">Match threshold: {cfg.sanctions.match_threshold}</p>
@@ -167,7 +167,7 @@ export default function RulesPage() {
 
       {/* National AML/CFT Priorities coverage */}
       {cfg.national_priorities && (
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-1">FinCEN National AML/CFT Priorities</h2>
           <p className="text-xs text-gray-400 mb-4">{cfg.national_priorities.note}</p>
           <div className="space-y-2">
@@ -188,7 +188,7 @@ export default function RulesPage() {
 
       {/* Admin tuning */}
       {isAdmin && (
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold text-gray-700">Tune rules</h2>
@@ -264,7 +264,7 @@ export default function RulesPage() {
       )}
 
       {/* Tuning log */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-1">Tuning log</h2>
         <p className="text-xs text-gray-400 mb-3">Every parameter change with before/after values, actor, rationale, and backtest evidence.</p>
         {changes.length === 0 && <p className="text-sm text-gray-400">No parameter changes recorded yet.</p>}

@@ -1,0 +1,238 @@
+{
+  "info": {
+    "name": "FMS — Fraud Monitoring System API",
+    "description": "Transaction monitoring & BSA/AML compliance API.\n\n**Two ways to authenticate:**\n- **People / dashboard endpoints** — Bearer token from `POST /auth/login` (run it first; this collection saves the token automatically).\n- **Machine ingestion** — the `X-API-Key` header on `/ingest/transactions`.\n\n**Set these collection variables first:** `baseUrl` (your FMS host), `apiKey` (your ingestion key). The `token` variable is filled in for you when you run **Auth → Login**.\n\nPush mode lets an institution POST transactions and get a synchronous risk verdict — no database integration. See `docs/PUSH_API.md` in the repo for the full integrator guide.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://fms-production-c7d8.up.railway.app" },
+    { "key": "apiKey", "value": "YOUR_INGEST_API_KEY" },
+    { "key": "token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j && j.token) {",
+                  "  pm.collectionVariables.set('token', j.token);",
+                  "  console.log('Saved bearer token to {{token}}');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@fms.demo\",\n  \"password\": \"DemoAdmin!2026\"\n}"
+            },
+            "description": "Sign in and receive a signed bearer token. This request's test script saves the token into the `token` collection variable, so every other request is authenticated automatically."
+          }
+        },
+        {
+          "name": "Current user",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth", "me"] },
+            "description": "Return the currently authenticated user (id, role, etc.)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ingestion (push mode)",
+      "item": [
+        {
+          "name": "Send transaction",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/ingest/transactions", "host": ["{{baseUrl}}"], "path": ["ingest", "transactions"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_id\": \"TXN-2026-000123\",\n  \"account_id\": \"ACC-778899\",\n  \"amount\": 9600,\n  \"direction\": \"OUTWARD\",\n  \"counterparty_name\": \"Acme Holdings Ltd\",\n  \"channel\": \"wire\",\n  \"currency\": \"USD\",\n  \"account_holder_name\": \"John A. Doe\"\n}"
+            },
+            "description": "POST a transaction and get a synchronous risk verdict. Auth is the `X-API-Key` header (not a bearer token). `external_id` is idempotent — a repeat returns the original verdict and never double-cases. Required: `external_id`, `account_id`, `amount` (> 0), `direction` (`INWARD`/`OUTWARD`). Names, if supplied, are screened against OFAC. Full field reference: `docs/PUSH_API.md`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cases",
+      "item": [
+        {
+          "name": "List cases",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cases?status=OPEN&limit=25",
+              "host": ["{{baseUrl}}"],
+              "path": ["cases"],
+              "query": [
+                { "key": "status", "value": "OPEN" },
+                { "key": "limit", "value": "25" }
+              ]
+            },
+            "description": "List/filter cases (status, confidence, date range, pagination)."
+          }
+        },
+        {
+          "name": "Get case detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/cases/:caseId", "host": ["{{baseUrl}}"], "path": ["cases", ":caseId"], "variable": [{ "key": "caseId", "value": "" }] },
+            "description": "Full case detail: signals that fired, reasons, screening result, and action history."
+          }
+        },
+        {
+          "name": "Act on a case",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/cases/:caseId/actions", "host": ["{{baseUrl}}"], "path": ["cases", ":caseId", "actions"], "variable": [{ "key": "caseId", "value": "" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"CONFIRMED_FRAUD\",\n  \"note\": \"Confirmed structuring — filing SAR.\"\n}"
+            },
+            "description": "Dispose a case: CONFIRMED_FRAUD / DISMISSED / ESCALATED / UNDER_REVIEW, or add a note. Analyst or admin only; every action is audited."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports (CTR / SAR)",
+      "item": [
+        {
+          "name": "CTR report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/ctr?format=json",
+              "host": ["{{baseUrl}}"],
+              "path": ["reports", "ctr"],
+              "query": [{ "key": "format", "value": "json", "description": "json | csv | fincen | xml" }]
+            },
+            "description": "CTR-required cases. `format=fincen` returns Form 112 field worksheets; `format=xml` a draft FinCEN batch file. FMS never transmits filings."
+          }
+        },
+        {
+          "name": "SAR report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/sar?format=json",
+              "host": ["{{baseUrl}}"],
+              "path": ["reports", "sar"],
+              "query": [{ "key": "format", "value": "json", "description": "json | csv | fincen | xml" }]
+            },
+            "description": "SAR-recommended cases with the 30-day deadline clock. `format=fincen` returns Form 111 worksheets."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Screening",
+      "item": [
+        {
+          "name": "Screen names (OFAC)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/screening/check", "host": ["{{baseUrl}}"], "path": ["screening", "check"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"names\": [\n    \"John A. Doe\",\n    \"Acme Holdings Ltd\"\n  ]\n}"
+            },
+            "description": "Batch-screen names against OFAC SDN + Consolidated + PEP lists. Returns hits with list type, program, and match score."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Detection & analytics",
+      "item": [
+        {
+          "name": "Detection rules",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/rules", "host": ["{{baseUrl}}"], "path": ["rules"] },
+            "description": "The live engine, fully transparent: thresholds, detection windows, scoring components, risk bands, sanctions config."
+          }
+        },
+        {
+          "name": "Dashboard stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/stats", "host": ["{{baseUrl}}"], "path": ["stats"] },
+            "description": "Headline KPIs: open cases, flagged today, sanctions hits, SARs/CTRs, confirmed fraud."
+          }
+        },
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "Poller / data-source status."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "Audit log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/audit?limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["audit"],
+              "query": [{ "key": "limit", "value": "50" }]
+            },
+            "description": "Who did what, when — the full activity trail (admin only)."
+          }
+        },
+        {
+          "name": "Security events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/audit/security", "host": ["{{baseUrl}}"], "path": ["audit", "security"] },
+            "description": "Security-relevant events only: sign-ins & failures, rate-limiting, rejected ingest keys, OFAC hits, account/role changes (admin only)."
+          }
+        }
+      ]
+    }
+  ]
+}

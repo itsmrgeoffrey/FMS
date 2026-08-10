@@ -21,7 +21,7 @@ export default function CasesPage() {
     <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">Transaction Monitor</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Transaction Monitor</h1>
         <div className="flex items-center gap-2">
           <form onSubmit={runSearch} className="relative">
             <input

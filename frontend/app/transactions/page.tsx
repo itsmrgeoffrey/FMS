@@ -31,7 +31,7 @@ export default function TransactionsPage() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Transactions</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Transactions</h1>
           <p className="text-sm text-gray-500 mt-1">Every monitored transaction the engine has analyzed.</p>
         </div>
         <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium">
@@ -44,7 +44,7 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">

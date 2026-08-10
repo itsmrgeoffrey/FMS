@@ -27,6 +27,8 @@ curl -X POST http://localhost:8002/ingest/transactions \
 ```
 Returns the verdict **synchronously**: risk score/level, the named signals that fired (with the actual numbers), CTR/SAR assessment, sanctions/watch-list result, and the case id if one was raised. `external_id` is idempotent — the same id never creates a duplicate case. `POST /ingest/simulate` (authenticated user, not the ingest key) exercises the same path for demos.
 
+**→ Integrating a system to push transactions?** The full integrator guide — field-by-field request/response schema, error codes, idempotency, and copy-paste **curl / Python / Node** examples — is in **[PUSH_API.md](PUSH_API.md)**. It's the page to hand an institution that just wants to POST transactions without touching a database.
+
 ## Cases & investigation
 
 | Endpoint | Role | Purpose |

@@ -28,11 +28,11 @@ export default function AlertsPage() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Alerts</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Alerts</h1>
         <p className="text-sm text-gray-500 mt-1">Open cases requiring review — highest risk first.</p>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">

@@ -51,7 +51,7 @@ export default function ReportsPage() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports (SAR / STR)</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Reports (SAR / STR)</h1>
           <p className="text-sm text-gray-500 mt-1">Filing worksheets for your compliance officer. Not filed automatically.</p>
         </div>
         <div className="flex gap-2">
@@ -59,7 +59,7 @@ export default function ReportsPage() {
             Export {tab.toUpperCase()} (CSV)
           </a>
           <a href={xmlUrl} title="Batch XML structured after the FinCEN E-Filing format. DRAFT — complete the marked items and validate with FinCEN's batch validator before upload."
-            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+            className="text-sm font-medium px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-700 bg-white hover:bg-gray-50">
             Batch XML (draft)
           </a>
         </div>
@@ -74,7 +74,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
         <div className="px-4 py-2 border-b border-gray-100 text-xs text-gray-500">{rows.length} record(s)</div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -127,7 +127,7 @@ export default function ReportsPage() {
 
       {/* FinCEN 314(a) scan (admin) */}
       {isAdmin && (
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
             <div>
               <h2 className="text-sm font-semibold text-gray-700">FinCEN 314(a) scan</h2>

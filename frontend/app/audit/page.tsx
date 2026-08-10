@@ -90,13 +90,13 @@ export default function AuditPage() {
           ← All users
         </button>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{selected}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">{selected}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {summary ? `${summary.actions} recorded actions · ${summary.case_actions} case actions · ${summary.failed_logins} failed sign-ins` : "Activity history"}
           </p>
         </div>
 
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
+        <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-4">Activity history</h2>
           {history.length === 0 ? (
             <p className="text-sm text-gray-400">Loading…</p>
@@ -123,7 +123,7 @@ export default function AuditPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Audit &amp; Security</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Audit &amp; Security</h1>
         <p className="text-sm text-gray-500 mt-1">Who did what across the system, and the security-relevant events an examiner cares about.</p>
       </div>
 
@@ -142,7 +142,7 @@ export default function AuditPage() {
       </div>
 
       {tab === "users" ? (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
@@ -185,14 +185,14 @@ export default function AuditPage() {
               { label: "Rejected API keys", value: sec?.counts.rejected_keys ?? 0, tone: "text-amber-600" },
               { label: "Sanctions hits", value: sec?.counts.sanctions_hits ?? 0, tone: "text-red-600" },
             ].map((t) => (
-              <div key={t.label} className="bg-white rounded-lg border border-gray-200 p-4">
+              <div key={t.label} className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-4">
                 <p className="text-xs text-gray-500">{t.label}</p>
                 <p className={`text-2xl font-bold mt-1 ${t.value > 0 ? t.tone : "text-gray-800"}`}>{t.value}</p>
               </div>
             ))}
           </div>
 
-          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">

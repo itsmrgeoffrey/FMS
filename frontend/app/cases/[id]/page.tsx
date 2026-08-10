@@ -80,7 +80,7 @@ export default function CaseDetailPage() {
       </div>
 
       {/* Transaction details */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">Transaction Details</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
           <Field label="Account" value={caseData.account_id} />
@@ -149,7 +149,7 @@ export default function CaseDetailPage() {
       )}
 
       {/* Risk engine analysis — fraud risk track */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <div className="flex items-center gap-3 mb-4">
           <h2 className="text-sm font-semibold text-gray-700">Fraud Risk Analysis</h2>
           {caseData.fraud_type && (
@@ -167,13 +167,13 @@ export default function CaseDetailPage() {
       </section>
 
       {/* Actions */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">Take Action</h2>
         <ActionPanel caseData={caseData} onUpdate={setCaseData} />
       </section>
 
       {/* Audit trail */}
-      <section className="bg-white rounded-lg border border-gray-200 p-5">
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">Audit Trail</h2>
         <AuditTrail actions={caseData.actions} />
       </section>

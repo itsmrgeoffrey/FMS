@@ -262,7 +262,7 @@ export default function DemoPage() {
                     placeholder="0.00"
                     value={form.amount}
                     onChange={e => set("amount", e.target.value)}
-                    className="flex-1 text-2xl font-bold text-gray-900 bg-transparent focus:outline-none placeholder-gray-200"
+                    className="flex-1 text-2xl font-semibold tracking-tight text-gray-900 bg-transparent focus:outline-none placeholder-gray-200"
                   />
                 </div>
                 <div className="h-px bg-gray-100 mt-3" />

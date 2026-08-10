@@ -40,6 +40,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Hide the Next.js dev-tools overlay (the "N" route/bundler indicator).
+  // Dev-only anyway — it never appears in the production build.
+  devIndicators: false,
   async rewrites() {
     return [
       {

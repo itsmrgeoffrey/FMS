@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { auth } from "@/lib/api";
+import { api, auth } from "@/lib/api";
 import type { AuthUser } from "@/types";
 
 const ICONS = {
@@ -18,9 +18,14 @@ const ICONS = {
   admin: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
   demo: "M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z",
   risk: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
+  developers: "M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4",
 };
 
-const NAV_GROUPS: { section: string; requires?: string; items: { href: string; label: string; d: string; requires?: string }[] }[] = [
+// Where the "API Docs" link points. Swap this for your published Postman docs URL
+// when ready (currently the live interactive Swagger explorer as a working default).
+const DOCS_URL = "https://fms-production-c7d8.up.railway.app/docs";
+
+const NAV_GROUPS: { section: string; requires?: string; items: { href: string; label: string; d: string; requires?: string; external?: boolean }[] }[] = [
   { section: "Overview", items: [
     { href: "/dashboard", label: "Dashboard", d: ICONS.dashboard },
     { href: "/analytics", label: "Analytics", d: ICONS.analytics },
@@ -45,6 +50,9 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
   { section: "Tools", requires: "act", items: [
     { href: "/demo", label: "Simulate (Demo)", d: ICONS.demo },
   ] },
+  { section: "Resources", items: [
+    { href: DOCS_URL, label: "API Docs", d: ICONS.developers, external: true },
+  ] },
 ];
 
 const ROLE_CAPS: Record<string, string[]> = {
@@ -56,12 +64,15 @@ function can(role: string | undefined, cap: string): boolean {
   return (ROLE_CAPS[role ?? ""] ?? []).includes(cap);
 }
 
+const DEMO_BANNER = process.env.NEXT_PUBLIC_DEMO !== "false";
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [alerts, setAlerts] = useState(0);
 
   const isLogin = pathname === "/login";
 
@@ -70,6 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setUser(u);
     setReady(true);
     if (!u && !isLogin) router.replace("/login");
+    if (u && !isLogin) api.getDashboard().then((d) => setAlerts(d.totals.open_cases)).catch(() => {});
   }, [pathname, isLogin, router]);
 
   // The login page renders standalone (no shell).
@@ -86,8 +98,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 bg-slate-900 flex flex-col">
+    <div className="flex flex-col min-h-screen">
+      {DEMO_BANNER && (
+        <div className="bg-amber-50 text-amber-800 border-b border-amber-200 text-center text-[11px] font-medium tracking-wide py-1.5 px-4">
+          <span className="font-bold">Demo environment</span> — synthetic data only. Do not enter real customer or transaction data.
+        </div>
+      )}
+      <div className="flex flex-1 min-h-0">
+        <aside className="w-56 shrink-0 bg-slate-900 flex flex-col">
         <div className="px-5 py-5 border-b border-slate-700">
           <p className="text-white font-bold text-lg tracking-tight">FMS</p>
           <p className="text-slate-400 text-xs mt-0.5">Fraud Monitoring System</p>
@@ -117,18 +135,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <div className="space-y-1">
                     {group.items.map((n) => {
                       const active = pathname === n.href || pathname.startsWith(n.href + "/");
-                      return (
-                        <Link
-                          key={n.href}
-                          href={n.href}
-                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                            active ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                          }`}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={n.d} />
-                          </svg>
-                          {n.label}
+                      const itemCls = `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                        active && !n.external ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      }`;
+                      const itemInner = (
+                        <>
+                          <span className="relative shrink-0">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={n.d} />
+                            </svg>
+                            {n.href === "/alerts" && alerts > 0 && (
+                              <span className="absolute -top-1 -right-1 min-w-[13px] h-[13px] flex items-center justify-center text-[8px] font-bold leading-none px-1 rounded-full bg-red-500 text-white ring-[1.5px] ring-slate-900 tabular-nums">
+                                {alerts > 99 ? "99+" : alerts}
+                              </span>
+                            )}
+                          </span>
+                          <span className="flex-1">{n.label}</span>
+                          {n.external && (
+                            <svg className="w-3 h-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5h5v5m0-5L9 15M8 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-3" />
+                            </svg>
+                          )}
+                        </>
+                      );
+                      return n.external ? (
+                        <a key={n.href} href={n.href} target="_blank" rel="noopener noreferrer" className={itemCls}>
+                          {itemInner}
+                        </a>
+                      ) : (
+                        <Link key={n.href} href={n.href} className={itemCls}>
+                          {itemInner}
                         </Link>
                       );
                     })}
@@ -156,6 +192,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="flex-1 overflow-auto">{children}</main>
+      </div>
     </div>
   );
 }
