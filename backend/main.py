@@ -14,8 +14,8 @@ from backend.config import settings as app_settings, CORS_ORIGINS
 from backend.database import init_db
 from backend.logging_config import request_id_var, setup_logging
 from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest, risk
-from backend.routers import settings as settings_routes
-from backend.services import poller, sanctions
+from backend.routers import settings as settings_routes, metrics as metrics_routes
+from backend.services import poller, sanctions, metrics
 
 # Configure logging before anything else emits records (env-controlled level and
 # an optional rotating file — see backend/logging_config.py).
@@ -74,14 +74,29 @@ async def _retention_loop():
         await asyncio.sleep(24 * 3600)
 
 
+async def _metrics_flush_loop():
+    """Persist buffered request counts every 30s so usage totals survive restarts."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await metrics.flush()
+        except Exception as e:
+            log.warning(f"metrics flush failed (will retry): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     poll_task = asyncio.create_task(poller.poll_loop())
     ofac_task = asyncio.create_task(_ofac_refresh_loop())
     retention_task = asyncio.create_task(_retention_loop())
+    flush_task = asyncio.create_task(_metrics_flush_loop())
     yield
-    for task in (poll_task, ofac_task, retention_task):
+    try:
+        await metrics.flush()  # persist any buffered counts on shutdown
+    except Exception:
+        pass
+    for task in (poll_task, ofac_task, retention_task, flush_task):
         task.cancel()
         try:
             await task
@@ -168,6 +183,23 @@ async def limit_body_size(request, call_next):
 
 
 @app.middleware("http")
+async def usage_metrics(request, call_next):
+    """Count real API usage + latency for the public status page. Excludes
+    health/metrics polling and CORS preflight so the numbers reflect actual
+    usage, not infrastructure noise."""
+    path = request.url.path
+    if request.method == "OPTIONS" or path.startswith("/metrics") or path.startswith("/health"):
+        return await call_next(request)
+    start = time.perf_counter()
+    resp = await call_next(request)
+    try:
+        metrics.record_request((time.perf_counter() - start) * 1000)
+    except Exception:
+        pass
+    return resp
+
+
+@app.middleware("http")
 async def rate_limit_ingest(request, call_next):
     """Per-IP rate limit on the push-ingestion endpoints, on top of the API key —
     contains a compromised or runaway key. Login has its own throttle."""
@@ -194,3 +226,4 @@ app.include_router(insights.router)
 app.include_router(ingest.router)
 app.include_router(approvals.router)
 app.include_router(risk.router)
+app.include_router(metrics_routes.router)

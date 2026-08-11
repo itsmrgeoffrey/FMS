@@ -185,3 +185,17 @@ class ProcessingState(Base):
     last_processed_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     last_processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UsageDaily(Base):
+    """Aggregate daily usage counter for the public metrics/status page.
+
+    Privacy-preserving by design: a per-day count of HTTP requests served, with
+    NO user, device, IP, or session identifiers stored. (Transactions, alerts,
+    and logins are counted directly from their own tables; this records only
+    request volume, which isn't otherwise persisted.) create_all() builds this
+    table on startup, so no migration is needed on existing deployments."""
+    __tablename__ = "usage_daily"
+
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # YYYY-MM-DD (UTC)
+    requests: Mapped[int] = mapped_column(Integer, default=0)

@@ -19,6 +19,7 @@ const ICONS = {
   demo: "M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z",
   risk: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
   developers: "M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4",
+  metrics: "M3 12h3l3 8 4-16 3 8h5",
 };
 
 // Where the "API Docs" link points. Swap this for your published Postman docs URL
@@ -52,6 +53,7 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
   ] },
   { section: "Resources", items: [
     { href: DOCS_URL, label: "API Docs", d: ICONS.developers, external: true },
+    { href: "/metrics", label: "Metrics", d: ICONS.metrics, external: true },
   ] },
 ];
 
@@ -76,18 +78,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileNav, setMobileNav] = useState(false);
 
   const isLogin = pathname === "/login";
+  const isStandalone = isLogin || pathname === "/metrics";
 
   useEffect(() => {
     const u = auth.user();
     setUser(u);
     setReady(true);
     setMobileNav(false); // close the drawer on navigation
-    if (!u && !isLogin) router.replace("/login");
-    if (u && !isLogin) api.getDashboard().then((d) => setAlerts(d.totals.open_cases)).catch(() => {});
-  }, [pathname, isLogin, router]);
+    if (!u && !isStandalone) router.replace("/login");
+    if (u && !isStandalone) api.getDashboard().then((d) => setAlerts(d.totals.open_cases)).catch(() => {});
+  }, [pathname, isStandalone, router]);
 
-  // The login page renders standalone (no shell).
-  if (isLogin) return <>{children}</>;
+  // The login page and the public /metrics status page render standalone (no shell).
+  if (isStandalone) return <>{children}</>;
 
   // Avoid flashing the app before the auth check resolves.
   if (!ready || !user) {
