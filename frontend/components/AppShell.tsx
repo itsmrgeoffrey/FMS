@@ -73,6 +73,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState(0);
+  const [mobileNav, setMobileNav] = useState(false);
 
   const isLogin = pathname === "/login";
 
@@ -80,6 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const u = auth.user();
     setUser(u);
     setReady(true);
+    setMobileNav(false); // close the drawer on navigation
     if (!u && !isLogin) router.replace("/login");
     if (u && !isLogin) api.getDashboard().then((d) => setAlerts(d.totals.open_cases)).catch(() => {});
   }, [pathname, isLogin, router]);
@@ -104,94 +106,126 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="font-bold">Demo environment</span> — synthetic data only. Do not enter real customer or transaction data.
         </div>
       )}
-      <div className="flex flex-1 min-h-0">
-        <aside className="w-56 shrink-0 bg-slate-900 flex flex-col">
-        <div className="px-5 py-5 border-b border-slate-700">
-          <p className="text-white font-bold text-lg tracking-tight">FMS</p>
-          <p className="text-slate-400 text-xs mt-0.5">Fraud Monitoring System</p>
-        </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
-          {NAV_GROUPS
-            .filter((g) => !g.requires || can(user.role, g.requires))
-            .map((g) => ({ ...g, items: g.items.filter((n) => !n.requires || can(user.role, n.requires)) }))
-            .filter((g) => g.items.length > 0)
-            .map((group) => {
-            const isCollapsed = collapsed[group.section];
-            return (
-              <div key={group.section}>
-                <button
-                  onClick={() => setCollapsed((c) => ({ ...c, [group.section]: !c[group.section] }))}
-                  className="w-full flex items-center justify-between px-3 mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
-                >
-                  {group.section}
-                  <svg
-                    className={`w-3 h-3 transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {!isCollapsed && (
-                  <div className="space-y-1">
-                    {group.items.map((n) => {
-                      const active = pathname === n.href || pathname.startsWith(n.href + "/");
-                      const itemCls = `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                        active && !n.external ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                      }`;
-                      const itemInner = (
-                        <>
-                          <span className="relative shrink-0">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={n.d} />
-                            </svg>
-                            {n.href === "/alerts" && alerts > 0 && (
-                              <span className="absolute -top-1 -right-1 min-w-[13px] h-[13px] flex items-center justify-center text-[8px] font-bold leading-none px-1 rounded-full bg-red-500 text-white ring-[1.5px] ring-slate-900 tabular-nums">
-                                {alerts > 99 ? "99+" : alerts}
-                              </span>
-                            )}
-                          </span>
-                          <span className="flex-1">{n.label}</span>
-                          {n.external && (
-                            <svg className="w-3 h-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5h5v5m0-5L9 15M8 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-3" />
-                            </svg>
-                          )}
-                        </>
-                      );
-                      return n.external ? (
-                        <a key={n.href} href={n.href} target="_blank" rel="noopener noreferrer" className={itemCls}>
-                          {itemInner}
-                        </a>
-                      ) : (
-                        <Link key={n.href} href={n.href} className={itemCls}>
-                          {itemInner}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </nav>
-        <div className="px-4 py-4 border-t border-slate-700">
-          <p className="text-white text-sm font-medium truncate">{user.full_name || user.username}</p>
-          <p className="text-slate-400 text-xs capitalize">{user.role}</p>
-          {user.role !== "admin" && (
-            <Link href="/settings" className="mt-3 block text-xs text-slate-300 hover:text-white transition-colors">
-              Account
-            </Link>
-          )}
-          <button
-            onClick={logout}
-            className="mt-2 w-full text-left text-xs text-slate-300 hover:text-white transition-colors"
-          >
-            Sign out
-          </button>
-        </div>
-      </aside>
 
-      <main className="flex-1 overflow-auto">{children}</main>
+      {/* Mobile top bar (below lg) — hamburger to open the nav drawer */}
+      <div className="lg:hidden flex items-center gap-3 px-4 py-2.5 bg-slate-900 border-b border-slate-800">
+        <button onClick={() => setMobileNav(true)} aria-label="Open menu" className="text-slate-200 hover:text-white p-1 -ml-1">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <span className="text-white font-bold tracking-tight">FMS</span>
+        {alerts > 0 && (
+          <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold px-1.5 rounded-full bg-red-500 text-white tabular-nums">
+            {alerts > 99 ? "99+" : alerts}
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+        {/* Backdrop (mobile only, when drawer open) */}
+        {mobileNav && (
+          <div onClick={() => setMobileNav(false)} className="fixed inset-0 z-30 bg-black/50 lg:hidden" aria-hidden="true" />
+        )}
+
+        <aside
+          className={`w-64 lg:w-56 shrink-0 bg-slate-900 flex flex-col fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out lg:static lg:z-auto lg:translate-x-0 ${
+            mobileNav ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <div className="px-5 py-5 border-b border-slate-700 flex items-center justify-between">
+            <div>
+              <p className="text-white font-bold text-lg tracking-tight">FMS</p>
+              <p className="text-slate-400 text-xs mt-0.5">Fraud Monitoring System</p>
+            </div>
+            <button onClick={() => setMobileNav(false)} aria-label="Close menu" className="lg:hidden text-slate-400 hover:text-white p-1 -mr-1">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
+            {NAV_GROUPS
+              .filter((g) => !g.requires || can(user.role, g.requires))
+              .map((g) => ({ ...g, items: g.items.filter((n) => !n.requires || can(user.role, n.requires)) }))
+              .filter((g) => g.items.length > 0)
+              .map((group) => {
+              const isCollapsed = collapsed[group.section];
+              return (
+                <div key={group.section}>
+                  <button
+                    onClick={() => setCollapsed((c) => ({ ...c, [group.section]: !c[group.section] }))}
+                    className="w-full flex items-center justify-between px-3 mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
+                  >
+                    {group.section}
+                    <svg
+                      className={`w-3 h-3 transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {!isCollapsed && (
+                    <div className="space-y-1">
+                      {group.items.map((n) => {
+                        const active = pathname === n.href || pathname.startsWith(n.href + "/");
+                        const itemCls = `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                          active && !n.external ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                        }`;
+                        const itemInner = (
+                          <>
+                            <span className="relative shrink-0">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={n.d} />
+                              </svg>
+                              {n.href === "/alerts" && alerts > 0 && (
+                                <span className="absolute -top-1 -right-1 min-w-[13px] h-[13px] flex items-center justify-center text-[8px] font-bold leading-none px-1 rounded-full bg-red-500 text-white ring-[1.5px] ring-slate-900 tabular-nums">
+                                  {alerts > 99 ? "99+" : alerts}
+                                </span>
+                              )}
+                            </span>
+                            <span className="flex-1">{n.label}</span>
+                            {n.external && (
+                              <svg className="w-3 h-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5h5v5m0-5L9 15M8 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-3" />
+                              </svg>
+                            )}
+                          </>
+                        );
+                        return n.external ? (
+                          <a key={n.href} href={n.href} target="_blank" rel="noopener noreferrer" onClick={() => setMobileNav(false)} className={itemCls}>
+                            {itemInner}
+                          </a>
+                        ) : (
+                          <Link key={n.href} href={n.href} onClick={() => setMobileNav(false)} className={itemCls}>
+                            {itemInner}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+          <div className="px-4 py-4 border-t border-slate-700">
+            <p className="text-white text-sm font-medium truncate">{user.full_name || user.username}</p>
+            <p className="text-slate-400 text-xs capitalize">{user.role}</p>
+            {user.role !== "admin" && (
+              <Link href="/settings" onClick={() => setMobileNav(false)} className="mt-3 block text-xs text-slate-300 hover:text-white transition-colors">
+                Account
+              </Link>
+            )}
+            <button
+              onClick={logout}
+              className="mt-2 w-full text-left text-xs text-slate-300 hover:text-white transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </aside>
+
+        <main className="flex-1 overflow-auto min-w-0">{children}</main>
       </div>
     </div>
   );
