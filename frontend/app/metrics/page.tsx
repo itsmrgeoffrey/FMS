@@ -87,7 +87,7 @@ export default function MetricsPage() {
               <Stat label="API requests" value={n(m.requests_total)} sub="total served" />
               <Stat label="Transactions processed" value={n(m.transactions_total)} sub={`${n(m.transactions_24h)} in 24h`} />
               <Stat label="Alerts generated" value={n(m.alerts_total)} sub={`${n(m.alerts_24h)} in 24h`} />
-              <Stat label="Sessions" value={n(m.sessions_total)} sub="logins recorded" />
+              <Stat label="Sessions" value={n(m.sessions_total)} sub="genuine logins" />
               <Stat label="Response time" value={`${m.latency_avg_ms} ms`} sub={`p95 ${m.latency_p95_ms} ms`} />
               <Stat label="System status" value={<span className="text-emerald-600">🟢 Operational</span>} />
               <Stat label="Last deployment" value={<span className="text-base">{fmtDate(m.serving_since)}</span>} />
@@ -115,7 +115,7 @@ export default function MetricsPage() {
             </section>
 
             <p className="text-center text-xs text-gray-400">
-              Live operational metrics of the deployed FMS system · synthetic demo data · refreshes every 30 seconds
+              Live operational metrics of the deployed FMS system · transaction &amp; alert figures are seeded demo data · refreshes every 30 seconds
             </p>
           </>
         )}

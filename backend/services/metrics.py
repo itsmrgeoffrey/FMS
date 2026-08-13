@@ -26,6 +26,12 @@ _latencies: deque[float] = deque(maxlen=1000)   # recent request latencies, ms
 # Short cache so a polling/public status page can't hammer the DB.
 _cache: dict = {"ts": 0.0, "data": None}
 
+# Loopback addresses. The demo seed writes a couple of LOGIN rows from 127.0.0.1
+# so the Security Events view isn't empty; we keep those in the audit log but
+# never count them as real sessions. A genuine deployed sign-in always records a
+# non-loopback client/proxy IP, so the session count only grows on real logins.
+_LOOPBACK_IPS = ("127.0.0.1", "::1", "localhost", "0.0.0.0")
+
 
 def record_request(latency_ms: float) -> None:
     global _req_delta
@@ -89,8 +95,14 @@ async def snapshot() -> dict:
             select(func.count()).select_from(FraudCase).where(FraudCase.created_at >= cutoff_24h)
         )).scalar_one()
 
+        # Genuine sign-ins only: real logins from a non-loopback IP. Seeded demo
+        # LOGIN rows (127.0.0.1) stay in the audit log but don't inflate this.
         sessions_total = (await db.execute(
-            select(func.count()).select_from(AuditLog).where(AuditLog.action == "LOGIN")
+            select(func.count()).select_from(AuditLog).where(
+                AuditLog.action == "LOGIN",
+                AuditLog.ip.isnot(None),
+                AuditLog.ip.notin_(_LOOPBACK_IPS),
+            )
         )).scalar_one()
 
         # 7-day trend (per-day range filters keep this portable across SQLite/SQL Server).
