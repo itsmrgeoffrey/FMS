@@ -27,6 +27,7 @@ here is name-based only.
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -186,6 +187,32 @@ def reload() -> int:
     global _entries
     _entries = None
     return len(_load())
+
+
+def has_full_list() -> bool:
+    """True if the real downloaded OFAC SDN list is present (not just the bundled
+    sample). Lets callers/status surface whether screening is running against the
+    live list or the tiny demo fallback."""
+    return _FULL_LIST.exists()
+
+
+def list_age_hours() -> float | None:
+    """Age of the downloaded OFAC SDN list in hours, or None if it isn't present
+    (i.e. we're on the bundled sample)."""
+    try:
+        if not _FULL_LIST.exists():
+            return None
+        return (time.time() - _FULL_LIST.stat().st_mtime) / 3600
+    except OSError:
+        return None
+
+
+def needs_refresh(max_age_hours: float) -> bool:
+    """True if the full OFAC list is missing or older than max_age_hours — used to
+    decide whether to refresh immediately on startup instead of waiting a whole
+    interval (which would leave a fresh deploy screening only the bundled sample)."""
+    age = list_age_hours()
+    return age is None or age >= max_age_hours
 
 
 def _parse_ofac_csv(prim_raw: str, alt_raw: str, source: str) -> list[dict]:

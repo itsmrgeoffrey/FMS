@@ -24,18 +24,34 @@ log = logging.getLogger(__name__)
 
 
 async def _ofac_refresh_loop():
-    """Refresh the OFAC SDN list on a schedule so screening never goes stale."""
+    """Keep the OFAC screening lists current in production.
+
+    On startup, if the downloaded SDN list is missing or older than the refresh
+    interval, pull it immediately — so a fresh deploy stops screening against the
+    tiny bundled sample within ~a minute instead of waiting a whole interval
+    (which would otherwise leave a 24h hole in SDN coverage on every deploy).
+    Then refresh on the configured schedule. Runs off the request path (executor)
+    and fails safe: a download error keeps the current list rather than clearing
+    it. Set FMS_OFAC_REFRESH_HOURS=0 to disable and manage the list yourself
+    (mounted file / cron / scripts/update_ofac.py)."""
     hours = app_settings.ofac_refresh_hours
     if hours <= 0:
         return
     loop = asyncio.get_running_loop()
-    while True:
-        await asyncio.sleep(hours * 3600)
+
+    async def _refresh(reason: str) -> None:
         try:
             count = await loop.run_in_executor(None, sanctions.refresh_from_treasury)
-            logging.getLogger(__name__).info(f"OFAC list auto-refreshed: {count} entries")
+            log.info(f"OFAC list refreshed ({reason}): {count} entries")
         except Exception as e:
-            logging.getLogger(__name__).warning(f"OFAC auto-refresh failed (keeping current list): {e}")
+            log.warning(f"OFAC refresh failed ({reason}) — keeping current list: {e}")
+
+    if sanctions.needs_refresh(hours):
+        await _refresh("startup: list missing or stale")
+
+    while True:
+        await asyncio.sleep(hours * 3600)
+        await _refresh("scheduled")
 
 
 async def _retention_loop():
