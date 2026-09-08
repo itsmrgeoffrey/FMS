@@ -84,6 +84,8 @@ function MyAccountSection() {
     setBusy(true);
     try {
       await api.changePassword(current, next);
+      // Lifts the temporary-password hold in AppShell without a re-login.
+      auth.update({ must_change_password: false });
       setMsg({ ok: true, text: "Password changed." });
       setCurrent(""); setNext(""); setConfirm("");
     } catch (e) {
@@ -462,34 +464,96 @@ function ApprovalsSection({
   );
 }
 
-function ComingSoon({ title, blurb, planned }: { title: string; blurb: string; planned: string[] }) {
+/**
+ * The role → capability matrix, read from the API so it always reflects what the
+ * server actually enforces rather than a hand-maintained copy that can drift.
+ */
+function RolesPermissions() {
+  const [data, setData] = useState<{
+    capabilities: { key: string; label: string; description: string }[];
+    roles: { role: string; capabilities: string[] }[];
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getRoles().then(setData).catch(() => setError("Could not load roles."));
+  }, []);
+
+  if (error) {
+    return (
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-6 text-sm text-red-600">
+        {error}
+      </section>
+    );
+  }
+  if (!data) {
+    return (
+      <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-6 text-sm text-gray-400">
+        Loading roles…
+      </section>
+    );
+  }
+
   return (
-    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-8 text-center">
-      <div className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500 mb-3">
-        Planned
+    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100">
+        <h2 className="text-base font-semibold text-gray-900">Roles &amp; Permissions</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Enforced by the API on every request. This table is read from the same definition the
+          server checks, so it cannot drift from what is actually applied. Assign a role to a
+          person under <span className="font-medium text-gray-700">Users</span>.
+        </p>
       </div>
-      <h2 className="text-base font-semibold text-gray-700">{title}</h2>
-      <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">{blurb}</p>
-      <ul className="mt-4 inline-block text-left text-sm text-gray-600 space-y-1">
-        {planned.map((p) => (
-          <li key={p} className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-300 inline-block" />{p}
-          </li>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
+              <th className="px-5 py-3 font-medium">Role</th>
+              {data.capabilities.map((c) => (
+                <th key={c.key} className="px-5 py-3 font-medium text-center">{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.roles.map((r) => (
+              <tr key={r.role} className="border-b border-gray-50 last:border-0">
+                <td className="px-5 py-3 font-medium text-gray-900 capitalize">{r.role}</td>
+                {data.capabilities.map((c) => (
+                  <td key={c.key} className="px-5 py-3 text-center">
+                    {r.capabilities.includes(c.key) ? (
+                      <span className="text-green-600 font-semibold" title={`${r.role} can ${c.label.toLowerCase()}`}>&#10003;</span>
+                    ) : (
+                      <span className="text-gray-300" title="Not permitted">&mdash;</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <dl className="px-5 py-4 border-t border-gray-100 space-y-2">
+        {data.capabilities.map((c) => (
+          <div key={c.key} className="flex gap-2 text-sm">
+            <dt className="font-medium text-gray-700 shrink-0">{c.label}</dt>
+            <dd className="text-gray-500">— {c.description}</dd>
+          </div>
         ))}
-      </ul>
+      </dl>
     </section>
   );
 }
 
-type AdminTab = "system" | "account" | "users" | "directory" | "roles" | "permissions" | "integrations";
+type AdminTab = "system" | "account" | "users" | "roles" | "directory" | "integrations";
 
-const TABS: { key: AdminTab; label: string; adminOnly?: boolean; planned?: boolean }[] = [
+const TABS: { key: AdminTab; label: string; adminOnly?: boolean }[] = [
   { key: "system", label: "System Settings" },
   { key: "account", label: "My Account" },
   { key: "users", label: "Users", adminOnly: true },
+  { key: "roles", label: "Roles & Permissions", adminOnly: true },
   { key: "directory", label: "Directory (SSO)", adminOnly: true },
-  { key: "roles", label: "Roles", adminOnly: true, planned: true },
-  { key: "permissions", label: "Permissions", adminOnly: true, planned: true },
   { key: "integrations", label: "API Integrations", adminOnly: true },
 ];
 
@@ -608,22 +672,12 @@ export default function SettingsPage() {
         {TABS.filter((t) => !t.adminOnly || isAdmin).map((t) => (
           <button
             key={t.key}
-            onClick={() => { if (!t.planned) { setTab(t.key); setNotice(null); setError(null); } }}
-            disabled={t.planned}
-            title={t.planned ? "Coming soon" : undefined}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors inline-flex items-center gap-1 ${
-              t.planned
-                ? "border-transparent text-gray-300 cursor-not-allowed"
-                : tab === t.key ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"
+            onClick={() => { setTab(t.key); setNotice(null); setError(null); }}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.key ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t.planned && (
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            )}
             {t.label}
-            {t.planned && <span className="ml-1 text-[10px] uppercase tracking-wide text-gray-300">Coming soon</span>}
           </button>
         ))}
       </div>
@@ -725,11 +779,6 @@ export default function SettingsPage() {
               <input type="checkbox" checked={!!db.trust_server_certificate} onChange={(e) => set(["database", "trust_server_certificate"], e.target.checked)} className="rounded border-gray-300" />
               Trust server certificate
             </label>
-            <button type="button" disabled title="Coming soon"
-              className="mt-1 text-xs px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-300 cursor-not-allowed inline-flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-              Upload SSL Certificate (coming soon)
-            </button>
           </div>
         </div>
 
@@ -1096,21 +1145,7 @@ export default function SettingsPage() {
         );
       })()}
 
-      {tab === "roles" && (
-        <ComingSoon
-          title="Roles"
-          blurb="FMS currently uses two built-in roles — admin and analyst — which gate access today. A UI to define and assign custom roles is planned."
-          planned={["Built-in: admin, analyst (active now)", "Create custom roles", "Assign roles per user"]}
-        />
-      )}
-
-      {tab === "permissions" && (
-        <ComingSoon
-          title="Permissions"
-          blurb="Access is role-based today (admin vs. analyst). Granular, per-capability permissions are planned."
-          planned={["Per-action permissions (view / action / configure)", "Permission sets attached to roles", "Least-privilege presets"]}
-        />
-      )}
+      {tab === "roles" && <RolesPermissions />}
 
       {tab === "integrations" && (<>
         <Section

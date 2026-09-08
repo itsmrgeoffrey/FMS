@@ -121,6 +121,8 @@ class UserOut(BaseModel):
     full_name: str | None
     role: str
     is_active: bool = True
+    # True while the account still holds an admin-issued temporary password.
+    must_change_password: bool = False
     created_at: datetime
     last_login_at: datetime | None
 

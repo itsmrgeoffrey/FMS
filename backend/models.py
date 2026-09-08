@@ -79,6 +79,10 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="analyst")  # admin / analyst / viewer
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Set when an admin issues a temporary password. Until the user chooses their
+    # own, the temp credential is known to whoever issued (and emailed) it, so the
+    # app blocks normal use until it is replaced.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

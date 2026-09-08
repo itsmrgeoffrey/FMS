@@ -86,6 +86,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setReady(true);
     setMobileNav(false); // close the drawer on navigation
     if (!u && !isStandalone) router.replace("/login");
+    // An admin-issued temporary password is known to whoever issued it, so it is
+    // a bootstrap credential rather than a usable one. Hold the account on
+    // Administration until it has been replaced.
+    if (u?.must_change_password && !isStandalone && pathname !== "/settings") {
+      router.replace("/settings");
+    }
     if (u && !isStandalone) api.getDashboard().then((d) => setAlerts(d.totals.open_cases)).catch(() => {});
   }, [pathname, isStandalone, router]);
 
@@ -228,7 +234,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-auto min-w-0">{children}</main>
+        <main className="flex-1 overflow-auto min-w-0">
+          {user.must_change_password && (
+            <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 text-sm text-amber-900">
+              <span className="font-semibold">Choose a new password to continue.</span>{" "}
+              You are signed in with a temporary password issued by an administrator. Until you
+              replace it under <span className="font-medium">My Account</span>, the rest of FMS
+              stays locked.
+            </div>
+          )}
+          {children}
+        </main>
       </div>
     </div>
   );

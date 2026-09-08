@@ -10,7 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import VALID_ROLES, create_token, hash_password, require_admin, require_user, verify_password
+from backend.auth import (
+    ROLE_CAPABILITIES, VALID_ROLES, create_token, hash_password,
+    require_admin, require_user, verify_password,
+)
 from backend.config import ENVIRONMENT, settings
 from backend.database import get_db
 from backend.models import User
@@ -177,6 +180,33 @@ async def me(user: User = Depends(require_user)):
     return UserOut.model_validate(user)
 
 
+CAPABILITY_LABELS: list[dict] = [
+    {"key": "view", "label": "View",
+     "description": "See dashboards, transactions, cases, reports and the audit trail"},
+    {"key": "act", "label": "Act on cases",
+     "description": "Dismiss, confirm, escalate and annotate cases"},
+    {"key": "admin", "label": "Administer",
+     "description": "Configure the system, manage users and approve sensitive changes"},
+]
+
+
+@router.get("/roles")
+async def list_roles(_user: User = Depends(require_user)):
+    """The role → capability matrix this API actually enforces.
+
+    Built from the same ROLE_CAPABILITIES the auth dependencies read, so the
+    Administration screen can never drift from what the server enforces — if a
+    role changes, the page changes with it.
+    """
+    return {
+        "capabilities": CAPABILITY_LABELS,
+        "roles": [
+            {"role": role, "capabilities": sorted(caps)}
+            for role, caps in sorted(ROLE_CAPABILITIES.items())
+        ],
+    }
+
+
 @router.post("/change-password")
 async def change_password(
     body: ChangePasswordRequest,
@@ -189,6 +219,7 @@ async def change_password(
     if len(body.new_password) < MIN_PASSWORD_LEN:
         raise HTTPException(status_code=400, detail=f"Password must be at least {MIN_PASSWORD_LEN} characters")
     user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False   # they now hold a secret only they know
     await db.commit()
     await audit.record(user.username, "PASSWORD_CHANGED", request=request)
     return {"changed": True}
@@ -227,6 +258,9 @@ async def _issue_temp_password(db: AsyncSession, target: User) -> tuple[str, boo
     """Set a fresh temporary password; email it when possible. Returns (temp, emailed)."""
     temp_password = secrets.token_urlsafe(9)
     target.password_hash = hash_password(temp_password)
+    # Whoever issued this password knows it (and it may have travelled by email),
+    # so it is a bootstrap credential, not a usable one. Force a replacement.
+    target.must_change_password = True
     await db.commit()
     emailed = False
     if target.email and emailer.is_configured():

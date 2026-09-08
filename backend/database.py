@@ -67,25 +67,70 @@ _ADDED_COLUMNS = {
     ],
     "users": [
         ("email", "TEXT"),
+        ("must_change_password", "BOOLEAN DEFAULT 0"),
     ],
 }
 
 
+# SQLite spellings above, translated for SQL Server. create_all() only fills in
+# columns when it creates the table, so a server database that predates a column
+# needs the same retrofit an existing SQLite file does.
+_MSSQL_TYPES = {"BOOLEAN": "BIT", "TEXT": "NVARCHAR(MAX)"}
+
+
+def _mssql_ddl(ddl: str) -> str:
+    """Translate a SQLite column definition to its T-SQL equivalent."""
+    parts = ddl.split(" ", 1)
+    base = _MSSQL_TYPES.get(parts[0].upper(), parts[0])
+    return base + (" " + parts[1] if len(parts) > 1 else "")
+
+
+async def _add_missing_columns(conn) -> None:
+    """Add columns introduced after a database was first created.
+
+    Portable across SQLite and SQL Server: the column list comes from the
+    SQLAlchemy inspector rather than a PRAGMA, and the ALTER is spelled per
+    dialect (SQLite wants ADD COLUMN, T-SQL wants ADD). Idempotent — a column
+    that already exists is skipped.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    dialect = conn.dialect.name
+    if dialect not in ("sqlite", "mssql"):
+        return  # unknown dialect: leave the schema alone rather than guess
+
+    def _columns(sync_conn, table: str) -> set[str]:
+        insp = sa_inspect(sync_conn)
+        if table not in insp.get_table_names():
+            return set()
+        return {c["name"] for c in insp.get_columns(table)}
+
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = await conn.run_sync(_columns, table)
+        if not existing:
+            continue  # table not created yet; create_all builds it complete
+        for name, ddl in columns:
+            if name in existing:
+                continue
+            if dialect == "sqlite":
+                stmt = f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"
+            else:
+                stmt = f"ALTER TABLE {table} ADD {name} {_mssql_ddl(ddl)}"
+            try:
+                await conn.exec_driver_sql(stmt)
+                log.info(f"Migration: added {table}.{name}")
+            except Exception as e:
+                log.warning(f"Could not add {table}.{name}: {e}")
+
+
 async def _run_migrations(conn) -> None:
-    # These are SQLite-specific retrofits (PRAGMA/ADD COLUMN) for evolving an
-    # existing SQLite file. On a server database, create_all() builds every
-    # table with all current columns, so nothing to retrofit.
+    # Column retrofits run on every supported dialect.
+    await _add_missing_columns(conn)
+
+    # The index retrofits below use SQLite-only syntax ("IF NOT EXISTS"), and a
+    # server database gets these constraints from create_all(), so stop here.
     if conn.dialect.name != "sqlite":
         return
-    for table, columns in _ADDED_COLUMNS.items():
-        existing = {
-            row[1]
-            for row in (await conn.exec_driver_sql(f"PRAGMA table_info({table})")).all()
-        }
-        for name, ddl in columns:
-            if name not in existing:
-                await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
-                log.info(f"Migration: added {table}.{name}")
 
     # Enforce one-case-per-source-transaction on databases that predate the
     # unique constraint. Fails only if the table already contains duplicates —

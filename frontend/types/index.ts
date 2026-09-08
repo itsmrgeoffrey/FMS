@@ -72,6 +72,8 @@ export interface AuthUser {
   full_name: string | null;
   role: "admin" | "analyst" | "viewer";
   is_active: boolean;
+  /** True while the account is still on an admin-issued temporary password. */
+  must_change_password?: boolean;
   created_at: string;
   last_login_at: string | null;
 }
