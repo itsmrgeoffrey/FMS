@@ -85,8 +85,8 @@ export default function MetricsPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Stat label="Uptime" value={fmtUptime(m.uptime_seconds)} sub="this deployment" />
               <Stat label="API requests" value={n(m.requests_total)} sub="total served" />
-              <Stat label="Transactions processed" value={n(m.transactions_total)} sub={`${n(m.transactions_24h)} in 24h`} />
-              <Stat label="Alerts generated" value={n(m.alerts_total)} sub={`${n(m.alerts_24h)} in 24h`} />
+              <Stat label="Transactions ingested" value={n(m.transactions_total)} sub={`via API · ${n(m.transactions_24h)} in 24h`} />
+              <Stat label="Alerts in case queue" value={n(m.alerts_total)} sub={`all sources · ${n(m.alerts_24h)} in 24h`} />
               <Stat label="Sessions" value={n(m.sessions_total)} sub="genuine logins" />
               <Stat label="Response time" value={`${m.latency_avg_ms} ms`} sub={`p95 ${m.latency_p95_ms} ms`} />
               <Stat label="System status" value={<span className="text-emerald-600">🟢 Operational</span>} />
@@ -115,7 +115,7 @@ export default function MetricsPage() {
             </section>
 
             <p className="text-center text-xs text-gray-400">
-              Live operational metrics of the deployed FMS system · transaction &amp; alert figures are seeded demo data · refreshes every 30 seconds
+              Live operational metrics of the deployed FMS system · ingested transactions are those pushed through the public API, while the case queue also holds seeded demo cases &mdash; the two counts cover different populations · refreshes every 30 seconds
             </p>
           </>
         )}
