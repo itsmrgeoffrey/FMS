@@ -27,6 +27,18 @@ export const auth = {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   },
+  /** Patch the cached user without re-authenticating — e.g. clearing the
+   *  must-change-password hold once the user has chosen their own password. */
+  update: (patch: Partial<AuthUser>) => {
+    if (typeof window === "undefined") return;
+    const raw = localStorage.getItem(USER_KEY);
+    if (!raw) return;
+    try {
+      localStorage.setItem(USER_KEY, JSON.stringify({ ...JSON.parse(raw), ...patch }));
+    } catch {
+      /* corrupt entry — auth.user() clears it on next read */
+    }
+  },
   clear: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
@@ -61,6 +73,50 @@ function reportUrl(kind: "ctr" | "sar", params: Record<string, string | undefine
   const qs = new URLSearchParams({ format });
   for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
   return `${BASE}/reports/${kind}?${qs}`;
+}
+
+/** Inclusive day range shared by the case, report and audit views. Both ends are
+ *  optional, so "from only" and "to only" are valid open-ended ranges. */
+export type DateRange = { date_from?: string; date_to?: string };
+
+/**
+ * Download a protected endpoint as a file.
+ *
+ * Every export route sits behind `require_user`, and auth is a bearer token held
+ * in localStorage — which a plain `<a href>` cannot send, so navigating to the
+ * URL just returns 401 JSON. Fetch it with the header instead, then hand the
+ * browser a blob. Honours the server's Content-Disposition filename.
+ */
+export async function downloadFile(url: string, fallbackName: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = auth.token();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  const blob = await res.blob();
+
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = match ? match[1] : fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+/** Build a query string, dropping empty values so an unset range sends nothing. */
+function qs(params: Record<string, string | number | undefined>): string {
+  const s = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") s.set(k, String(v));
+  }
+  const out = s.toString();
+  return out ? `?${out}` : "";
 }
 
 export const api = {
@@ -118,8 +174,10 @@ export const api = {
   sarReportUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params),
   ctrXmlDraftUrl: (params?: Record<string, string | undefined>) => reportUrl("ctr", params, "xml"),
   sarXmlDraftUrl: (params?: Record<string, string | undefined>) => reportUrl("sar", params, "xml"),
-  getCtrReport: (): Promise<{ count: number; items: Record<string, unknown>[] }> => req("/reports/ctr"),
-  getSarReport: (): Promise<{ count: number; items: Record<string, unknown>[] }> => req("/reports/sar"),
+  getCtrReport: (range: DateRange = {}): Promise<{ count: number; items: Record<string, unknown>[] }> =>
+    req(`/reports/ctr${qs(range)}`),
+  getSarReport: (range: DateRange = {}): Promise<{ count: number; items: Record<string, unknown>[] }> =>
+    req(`/reports/sar${qs(range)}`),
 
   // Rule tuning: backtest + change history
   backtestRules: (proposed: Record<string, unknown>, days = 90): Promise<BacktestResult> =>
@@ -175,12 +233,21 @@ export const api = {
     }),
 
   // Activity log
-  getAudit: (limit = 50, username?: string): Promise<AuditEntry[]> =>
-    req(`/audit?limit=${limit}${username ? `&username=${encodeURIComponent(username)}` : ""}`),
-  getAuditUsers: (): Promise<{ username: string; actions: number; failed_logins: number; case_actions: number; last_activity: string | null }[]> =>
-    req("/audit/users"),
-  getSecurityEvents: (limit = 100): Promise<SecurityEventsResponse> =>
-    req(`/audit/security?limit=${limit}`),
+  getAudit: (limit = 50, username?: string, range: DateRange = {}): Promise<AuditEntry[]> =>
+    req(`/audit${qs({ limit, username, ...range })}`),
+  getAuditUsers: (range: DateRange = {}): Promise<{ username: string; actions: number; failed_logins: number; case_actions: number; last_activity: string | null }[]> =>
+    req(`/audit/users${qs(range)}`),
+  /** CSV of the audit trail using the same filters the screen is showing. */
+  auditExportUrl: (params: Record<string, string | number | undefined> = {}) =>
+    `${BASE}/audit/export${qs(params)}`,
+
+  /** The role → capability matrix the API actually enforces (backend/auth.py). */
+  getRoles: (): Promise<{
+    capabilities: { key: string; label: string; description: string }[];
+    roles: { role: string; capabilities: string[] }[];
+  }> => req("/auth/roles"),
+  getSecurityEvents: (limit = 100, range: DateRange = {}): Promise<SecurityEventsResponse> =>
+    req(`/audit/security${qs({ limit, ...range })}`),
 
   // Account + user management
   changePassword: (current_password: string, new_password: string): Promise<{ changed: boolean }> =>

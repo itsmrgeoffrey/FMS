@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, type DateRange } from "@/lib/api";
+import DateRangePicker from "@/components/DateRangePicker";
 import type { FraudCaseListItem } from "@/types";
 
 function money(a: number, c: string) {
@@ -15,12 +16,13 @@ function fmtDate(ts: string) {
 export default function TransactionsPage() {
   const [items, setItems] = useState<FraudCaseListItem[]>([]);
   const [filter, setFilter] = useState<"all" | "flagged" | "clean">("all");
+  const [range, setRange] = useState<DateRange>({});
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getCases({ limit: 100 }).then((p) => setItems(p.items)).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    api.getCases({ limit: 100, ...range }).then((p) => setItems(p.items)).catch(() => {}).finally(() => setLoading(false));
+  }, [range]);
   useEffect(() => { load(); }, [load]);
 
   const shown = items.filter((c) =>
@@ -34,13 +36,16 @@ export default function TransactionsPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Transactions</h1>
           <p className="text-sm text-gray-500 mt-1">Every monitored transaction the engine has analyzed.</p>
         </div>
-        <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium">
-          {(["all", "flagged", "clean"] as const).map((f) => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1 rounded-md capitalize transition-colors ${filter === f ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>
-              {f}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <DateRangePicker value={range} onChange={setRange} />
+          <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium">
+            {(["all", "flagged", "clean"] as const).map((f) => (
+              <button key={f} onClick={() => setFilter(f)}
+                className={`px-3 py-1 rounded-md capitalize transition-colors ${filter === f ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -59,7 +64,9 @@ export default function TransactionsPage() {
           </thead>
           <tbody className={loading ? "opacity-50" : ""}>
             {!loading && shown.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">No transactions.</td></tr>
+              <tr><td colSpan={7} className="text-center py-12 text-gray-400">
+                {range.date_from || range.date_to ? "No transactions in this date range." : "No transactions."}
+              </td></tr>
             )}
             {shown.map((c) => (
               <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">

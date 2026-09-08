@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { api, type SecurityEventsResponse, type SecuritySeverity } from "@/lib/api";
+import { api, downloadFile, type DateRange, type SecurityEventsResponse, type SecuritySeverity } from "@/lib/api";
+import DateRangePicker from "@/components/DateRangePicker";
 import type { AuditEntry } from "@/types";
 
 interface UserRow {
@@ -61,22 +62,51 @@ export default function AuditPage() {
 
   const [sec, setSec] = useState<SecurityEventsResponse | null>(null);
   const [secLoading, setSecLoading] = useState(false);
+  const [range, setRange] = useState<DateRange>({});
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.getAuditUsers().then(setUsers).catch((e) => setError(String(e))).finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (tab === "security" && !sec) {
-      setSecLoading(true);
-      api.getSecurityEvents(200).then(setSec).catch((e) => setError(String(e))).finally(() => setSecLoading(false));
+  // Examiner workflow: filter a period, then take it away as a file. The export
+  // uses the same filters as the screen, so the two can never disagree.
+  async function exportCsv() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      await downloadFile(api.auditExportUrl({ ...range }), "fms_audit_trail.csv");
+    } catch {
+      setExportError("Export failed. Please try again.");
+    } finally {
+      setExporting(false);
     }
-  }, [tab, sec]);
+  }
+  const [histLoading, setHistLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    api.getAuditUsers(range).then(setUsers).catch((e) => setError(String(e))).finally(() => setLoading(false));
+  }, [range]);
+
+  // Refetch whenever the tab opens or the range changes — the events and their
+  // counts are both scoped to the selected period.
+  useEffect(() => {
+    if (tab !== "security") return;
+    setSecLoading(true);
+    api.getSecurityEvents(200, range).then(setSec).catch((e) => setError(String(e))).finally(() => setSecLoading(false));
+  }, [tab, range]);
+
+  // Drill-down history follows the same range as the summary it was opened from.
+  useEffect(() => {
+    if (!selected) return;
+    setHistLoading(true);
+    api.getAudit(500, selected, range)
+      .then(setHistory)
+      .catch((e) => setError(String(e)))
+      .finally(() => setHistLoading(false));
+  }, [selected, range]);
 
   const investigate = useCallback((username: string) => {
     setSelected(username);
     setHistory([]);
-    api.getAudit(500, username).then(setHistory).catch((e) => setError(String(e)));
   }, []);
 
   if (error) return <div className="p-6 text-sm text-red-600">{error}</div>;
@@ -89,17 +119,22 @@ export default function AuditPage() {
         <button onClick={() => setSelected(null)} className="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
           ← All users
         </button>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">{selected}</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {summary ? `${summary.actions} recorded actions · ${summary.case_actions} case actions · ${summary.failed_logins} failed sign-ins` : "Activity history"}
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-gray-900">{selected}</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {summary ? `${summary.actions} recorded actions · ${summary.case_actions} case actions · ${summary.failed_logins} failed sign-ins` : "Activity history"}
+            </p>
+          </div>
+          <DateRangePicker value={range} onChange={setRange} />
         </div>
 
         <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-4">Activity history</h2>
-          {history.length === 0 ? (
+          {histLoading ? (
             <p className="text-sm text-gray-400">Loading…</p>
+          ) : history.length === 0 ? (
+            <p className="text-sm text-gray-400">No activity in this date range.</p>
           ) : (
             <ol className="relative border-l border-gray-200 space-y-4 ml-2">
               {history.map((a) => (
@@ -122,10 +157,26 @@ export default function AuditPage() {
   // ── Main view: tabbed Users / Security events ──────────────────────────────
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Audit &amp; Security</h1>
-        <p className="text-sm text-gray-500 mt-1">Who did what across the system, and the security-relevant events an examiner cares about.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Audit &amp; Security</h1>
+          <p className="text-sm text-gray-500 mt-1">Who did what across the system, and the security-relevant events an examiner cares about.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <DateRangePicker value={range} onChange={setRange} />
+          <button type="button" onClick={() => void exportCsv()} disabled={exporting}
+            title="Download the audit trail for the selected range as CSV"
+            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+        </div>
       </div>
+
+      {exportError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {exportError}
+        </div>
+      )}
 
       <div className="flex gap-1 border-b border-gray-200">
         {(["users", "security"] as const).map((t) => (

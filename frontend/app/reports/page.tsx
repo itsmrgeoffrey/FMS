@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, auth } from "@/lib/api";
+import { api, auth, downloadFile, type DateRange } from "@/lib/api";
+import DateRangePicker from "@/components/DateRangePicker";
 import type { Scan314aResult } from "@/types";
 
 type Row = Record<string, unknown>;
@@ -15,6 +16,7 @@ function money(a: unknown, c: unknown) {
 export default function ReportsPage() {
   const [tab, setTab] = useState<"sar" | "ctr">("sar");
   const [rows, setRows] = useState<Row[]>([]);
+  const [range, setRange] = useState<DateRange>({});
   const [loading, setLoading] = useState(true);
   const [scan, setScan] = useState<Scan314aResult | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -24,13 +26,32 @@ export default function ReportsPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    const fetcher = tab === "sar" ? api.getSarReport() : api.getCtrReport();
+    const fetcher = tab === "sar" ? api.getSarReport(range) : api.getCtrReport(range);
     fetcher.then((r) => setRows(r.items)).catch(() => setRows([])).finally(() => setLoading(false));
-  }, [tab]);
+  }, [tab, range]);
   useEffect(() => { load(); }, [load]);
 
-  const downloadUrl = tab === "sar" ? api.sarReportUrl() : api.ctrReportUrl();
-  const xmlUrl = tab === "sar" ? api.sarXmlDraftUrl() : api.ctrXmlDraftUrl();
+  // Exports carry the same range, so a filtered view never exports more than it shows.
+  const downloadUrl = tab === "sar" ? api.sarReportUrl(range) : api.ctrReportUrl(range);
+  const xmlUrl = tab === "sar" ? api.sarXmlDraftUrl(range) : api.ctrXmlDraftUrl(range);
+
+  // These endpoints require auth, and a bare <a href> cannot send the bearer
+  // token — it would just download a 401. Fetch with the header instead.
+  const [downloading, setDownloading] = useState<"csv" | "xml" | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  async function download(kind: "csv" | "xml") {
+    setDownloading(kind);
+    setDownloadError(null);
+    try {
+      const url = kind === "csv" ? downloadUrl : xmlUrl;
+      await downloadFile(url, `${tab}_${kind === "csv" ? "report.csv" : "batch.xml"}`);
+    } catch {
+      setDownloadError("Export failed. Please try again.");
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   async function run314a(file: File) {
     setScanning(true);
@@ -55,24 +76,35 @@ export default function ReportsPage() {
           <p className="text-sm text-gray-500 mt-1">Filing worksheets for your compliance officer. Not filed automatically.</p>
         </div>
         <div className="flex gap-2">
-          <a href={downloadUrl} className="text-sm font-medium px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">
-            Export {tab.toUpperCase()} (CSV)
-          </a>
-          <a href={xmlUrl} title="Batch XML structured after the FinCEN E-Filing format. DRAFT — complete the marked items and validate with FinCEN's batch validator before upload."
-            className="text-sm font-medium px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-700 bg-white hover:bg-gray-50">
-            Batch XML (draft)
-          </a>
+          <button type="button" onClick={() => void download("csv")} disabled={downloading !== null}
+            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">
+            {downloading === "csv" ? "Exporting…" : `Export ${tab.toUpperCase()} (CSV)`}
+          </button>
+          <button type="button" onClick={() => void download("xml")} disabled={downloading !== null}
+            title="Batch XML structured after the FinCEN E-Filing format. DRAFT — complete the marked items and validate with FinCEN's batch validator before upload."
+            className="text-sm font-medium px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50">
+            {downloading === "xml" ? "Preparing…" : "Batch XML (draft)"}
+          </button>
         </div>
       </div>
 
-      <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium w-fit">
-        {(["sar", "ctr"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-md uppercase transition-colors ${tab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>
-            {t === "sar" ? "SAR / STR" : "CTR"}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium w-fit">
+          {(["sar", "ctr"] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-1.5 rounded-md uppercase transition-colors ${tab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>
+              {t === "sar" ? "SAR / STR" : "CTR"}
+            </button>
+          ))}
+        </div>
+        <DateRangePicker value={range} onChange={setRange} />
       </div>
+
+      {downloadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {downloadError}
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
         <div className="px-4 py-2 border-b border-gray-100 text-xs text-gray-500">{rows.length} record(s)</div>
