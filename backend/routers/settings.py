@@ -250,13 +250,39 @@ async def test_directory(user: User = Depends(require_admin)):
 
 @router.get("/system-info")
 async def system_info(user: User = Depends(require_admin)):
+    from backend.services import sanctions
+
+    api_mode = bank_config.get("monitoring", {}).get("mode", "poll") == "api"
+    # "database_connected" previously reported poller.is_running(), which is a
+    # flag set once at startup and never cleared — so it read "connected" in
+    # API-push mode (where there is no bank database at all) and stayed
+    # "connected" while the bank DB was down.
+    #
+    # Report the poller's LAST OBSERVED state instead of probing. A status
+    # endpoint must not open a connection to the institution's database as a
+    # side effect of someone loading the Administration page — that would send
+    # traffic to the bank host on every page view, and an admin refreshing would
+    # hammer it. The poller already records what it saw on its last cycle.
+    bank_connected = None if api_mode else poller.last_connect_ok()
+
+    # The write path exists but is gated to development (see routers/transactions.py),
+    # so report the real state rather than asserting True unconditionally.
+    write_path_enabled = ENVIRONMENT.lower() == "development"
+
     return {
         "app_version": APP_VERSION,
         "environment": ENVIRONMENT,
-        "database_connected": poller.is_running(),
+        "ingestion_mode": "api" if api_mode else "poll",
+        "database_connected": bank_connected,
+        "poller_running": poller.is_running(),
+        "poller_last_error": poller.last_error(),
         "database_type": bank_config.get("database", {}).get("type", ""),
-        "read_only": True,   # FMS only ever reads from the bank database
+        # True in every normal deployment; False only when the development-only
+        # demo injection endpoint is reachable.
+        "read_only": not write_path_enabled,
+        "demo_write_endpoint_enabled": write_path_enabled,
         "audit_logging": True,
+        "sanctions_screening": sanctions.status(),
         "encryption": {
             "auth_tokens_signed": True,
             "db_tls": bool(bank_config.get("database", {}).get("encrypt", False)),

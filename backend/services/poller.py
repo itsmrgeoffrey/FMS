@@ -11,7 +11,7 @@ from backend.database import SessionLocal
 from backend.models import FraudCase, ProcessingState
 from backend.services import analyzer
 from backend.services.broadcaster import broadcaster
-from backend.services import emailer
+from backend.services import emailer, notify
 
 log = logging.getLogger(__name__)
 
@@ -19,6 +19,10 @@ _running = False
 _last_poll_at: datetime | None = None
 _last_error: str | None = None
 _adapter: BaseAdapter | None = None
+# Last observed bank-DB reachability, recorded by the poller so status endpoints
+# can report it without opening their own connection. None = not yet checked.
+_connect_ok: bool | None = None
+_connect_checked_at: datetime | None = None
 
 
 def get_adapter() -> BaseAdapter:
@@ -175,10 +179,10 @@ async def _process_table(adapter: BaseAdapter, table_key: str, history_days: int
                     "created_at": str(case.created_at),
                 }
                 await broadcaster.broadcast({"event": "new_case", "case": case_dict})
-                # Send email off the event loop without blocking the poller. Use the
-                # running loop (get_event_loop() is deprecated inside a coroutine).
-                loop = asyncio.get_running_loop()
-                loop.run_in_executor(None, emailer.send_fraud_alert, case_dict)
+                # Send email off the poller on the dedicated notification pool —
+                # a hung mail server degrades notifications only, and a failure is
+                # logged rather than discarded with the future.
+                notify.submit(emailer.send_fraud_alert, case_dict, label="email:fraud_alert")
             else:
                 log.info(f"[{table_key}] txn {txn.id} — clean (risk={result.confidence})")
 
@@ -198,17 +202,35 @@ async def _process_table(adapter: BaseAdapter, table_key: str, history_days: int
 
 async def _ensure_connected(adapter: BaseAdapter) -> bool:
     """Connect if not already connected. Returns True on success."""
+    global _last_error, _connect_ok, _connect_checked_at
     try:
         if await adapter.is_connected():
+            _connect_ok, _connect_checked_at = True, datetime.utcnow()
             return True
         await adapter.connect()
         log.info("Bank DB connection (re)established")
+        _connect_ok, _connect_checked_at = True, datetime.utcnow()
         return True
     except Exception as e:
-        global _last_error
         _last_error = f"bank DB connect failed: {e}"
+        _connect_ok, _connect_checked_at = False, datetime.utcnow()
         log.error(_last_error)
         return False
+
+
+def last_connect_ok() -> bool | None:
+    """Whether the bank DB was reachable on the poller's last check.
+
+    Passive: reports what the poller already observed rather than opening a new
+    connection, so status endpoints never generate traffic to the institution's
+    database. None means the poller has not checked yet (e.g. API-push mode, or
+    before the first cycle completes).
+    """
+    return _connect_ok
+
+
+def last_connect_checked_at() -> datetime | None:
+    return _connect_checked_at
 
 
 async def poll_loop() -> None:

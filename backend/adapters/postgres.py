@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import asyncpg
 
-from backend.adapters.base import BaseAdapter, NormalizedTransaction, validate_identifier
+from backend.adapters.base import BaseAdapter, NormalizedTransaction, validate_identifier, CONNECT_TIMEOUT_SECONDS, QUERY_TIMEOUT_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -17,13 +17,18 @@ class PostgresAdapter(BaseAdapter):
 
     async def connect(self) -> None:
         cfg = self._db_cfg
+        # command_timeout bounds every statement run on this pool, so a hung
+        # bank database fails the poll cycle instead of stalling it indefinitely.
         self._pool = await asyncpg.create_pool(
             host=cfg["host"], port=int(cfg.get("port", 5432)),
             user=cfg["user"], password=cfg["password"], database=cfg["database"],
             min_size=1, max_size=5,
             ssl="require" if cfg.get("encrypt") else None,
+            timeout=CONNECT_TIMEOUT_SECONDS,
+            command_timeout=QUERY_TIMEOUT_SECONDS,
         )
-        log.info("Connected to bank PostgreSQL database")
+        log.info("Connected to bank PostgreSQL database (connect %ss, query %ss)",
+                 CONNECT_TIMEOUT_SECONDS, QUERY_TIMEOUT_SECONDS)
 
     async def disconnect(self) -> None:
         if self._pool:

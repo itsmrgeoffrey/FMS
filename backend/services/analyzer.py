@@ -848,7 +848,41 @@ async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransactio
     # counterparty is a block/report obligation regardless of risk level.
     # PEP matches are different in kind — enhanced due diligence, not blocking —
     # so they annotate the case instead of overriding it.
-    sanctions_match = sanctions.screen(txn.counterparty_name)
+    # If the list could not be loaded, the transaction was NOT screened. Never
+    # let that read as "no match": open the case for manual screening instead,
+    # because an unscreened transaction is the one state worse than a hit.
+    try:
+        sanctions_match = sanctions.screen(txn.counterparty_name)
+    except sanctions.ScreeningUnavailable as e:
+        log.error(f"Sanctions screening unavailable for txn {txn.id}: {e}")
+        is_fraudulent = True
+        confidence = "HIGH"
+        fraud_type = "screening unavailable"
+        reasons = [
+            f"MANUAL SANCTIONS SCREENING REQUIRED — this transaction was NOT screened "
+            f"against the OFAC list ({e}). Screen the counterparty manually before "
+            f"releasing, and restore the screening list."
+        ] + reasons
+        return FraudAnalysis(
+            is_fraudulent=True,
+            confidence="HIGH",
+            fraud_type="screening unavailable",
+            reasons=reasons,
+            summary=(
+                "This transaction could not be screened against the OFAC sanctions list "
+                "because the list was unavailable. It has been opened for manual review. "
+                "Screen the counterparty by hand before releasing the transaction, and "
+                "restore the screening list before processing further volume."
+            ),
+            risk_score=risk.score,
+            ctr_required=ctr.required,
+            ctr_reason=ctr.reason,
+            sar_recommended=sar_recommended,
+            sar_reason=sar_reason,
+            sanctions_hit=False,
+            sanctions_detail=f"NOT SCREENED — {e}",
+        )
+
     sanctions_hit = sanctions_match is not None and sanctions_match.list_type == "SDN"
     sanctions_detail = ""
     if sanctions_match and sanctions_match.list_type == "SDN":

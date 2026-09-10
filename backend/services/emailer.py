@@ -1,3 +1,4 @@
+import os
 import smtplib
 import logging
 from email.mime.multipart import MIMEMultipart
@@ -5,6 +6,15 @@ from email.mime.text import MIMEText
 from backend.config import settings
 
 log = logging.getLogger(__name__)
+
+# SMTP host/port are configurable so an institution can use its own relay rather
+# than Gmail. The TIMEOUT is the important one: smtplib defaults to the global
+# socket timeout, which is normally None — i.e. a server that accepts the
+# connection and never replies blocks the calling thread forever. These sends run
+# on a worker pool, so an unbounded hang leaks a thread per flagged case.
+SMTP_HOST = os.getenv("FMS_SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("FMS_SMTP_PORT", "465"))
+SMTP_TIMEOUT = float(os.getenv("FMS_SMTP_TIMEOUT", "15"))
 
 
 def send_webhook_alert(case: dict) -> None:
@@ -50,7 +60,7 @@ def _send(to_email: str, subject: str, html: str) -> bool:
     msg["To"] = to_email
     msg.attach(MIMEText(html, "html"))
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
             server.login(settings.gmail_user, settings.gmail_app_password)
             server.sendmail(settings.gmail_user, to_email, msg.as_string())
         log.info(f"Email sent to {to_email}: {subject}")
@@ -149,7 +159,7 @@ def send_fraud_alert(case: dict) -> None:
     msg.attach(MIMEText(body, "html"))
 
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
             server.login(settings.gmail_user, settings.gmail_app_password)
             server.sendmail(settings.gmail_user, msg["To"], msg.as_string())
         log.info(f"Fraud alert email sent for case {case['id']}")

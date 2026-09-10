@@ -1,7 +1,20 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+import os
 import re
+
+# Bank-database timeouts, shared by every adapter so they cannot drift apart.
+#
+# Both are needed and they are not the same thing: a CONNECT timeout bounds
+# session establishment, a QUERY timeout bounds each statement afterwards. An
+# adapter with only the first still wedges permanently when a bank database
+# accepts the connection and then stops responding mid-query — which is the
+# common failure, not a refused connection. Read-only monitoring queries should
+# fail fast and retry on the next poll cycle rather than hold a shared
+# connection open indefinitely.
+CONNECT_TIMEOUT_SECONDS = int(os.getenv("FMS_BANK_CONNECT_TIMEOUT", "10"))
+QUERY_TIMEOUT_SECONDS = int(os.getenv("FMS_BANK_QUERY_TIMEOUT", "30"))
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 

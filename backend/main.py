@@ -44,7 +44,15 @@ async def _ofac_refresh_loop():
             count = await loop.run_in_executor(None, sanctions.refresh_from_treasury)
             log.info(f"OFAC list refreshed ({reason}): {count} entries")
         except Exception as e:
-            log.warning(f"OFAC refresh failed ({reason}) — keeping current list: {e}")
+            # ERROR, not WARNING: this is the screening control. refresh_from_treasury
+            # now refuses to overwrite a good list with an implausibly small one, so
+            # a failure here means we are still screening against the PREVIOUS list —
+            # correct behaviour, but it goes stale until someone acts on it.
+            log.error(f"OFAC refresh failed ({reason}) — keeping current list: {e}")
+        # Whatever happened, say plainly whether screening is actually working.
+        st = sanctions.status()
+        if not st["ok"]:
+            log.error(f"SANCTIONS SCREENING NOT OPERATIONAL: {st['state']} — {st['detail']}")
 
     if sanctions.needs_refresh(hours):
         await _refresh("startup: list missing or stale")

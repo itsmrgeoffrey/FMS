@@ -165,7 +165,11 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
 async def health(db: AsyncSession = Depends(get_db), _user: User = Depends(require_user)):
     from backend.config import bank_config
     api_mode = (bank_config.get("monitoring", {}) or {}).get("mode", "poll") == "api"
-    bank_ok = False if api_mode else await poller.get_adapter().is_connected()
+    # Passive read of what the poller last observed. This endpoint is polled by
+    # the dashboard, and opening a real connection to the institution's database
+    # on every health check would send steady traffic to the bank host purely
+    # because someone has the UI open.
+    bank_ok = False if api_mode else bool(poller.last_connect_ok())
     running = poller.is_running()
     err = poller.last_error()
     healthy = running and not err and (api_mode or bank_ok)

@@ -28,7 +28,7 @@ from backend.config import bank_config, settings
 from backend.database import get_db, SessionLocal
 from backend.models import FraudCase, IngestedTransaction, User
 from backend.routers import audit
-from backend.services import analyzer, callbacks, emailer, sanctions
+from backend.services import analyzer, callbacks, emailer, notify, sanctions
 from backend.services.broadcaster import broadcaster
 
 log = logging.getLogger(__name__)
@@ -115,7 +115,20 @@ async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
     result = await analyzer.analyze(txn, [_to_normalized(h) for h in hist_rows])
 
     # Screen the ACCOUNT HOLDER too (the counterparty is screened inside analyze()).
-    holder_hit = sanctions.screen(body.account_holder_name) if body.account_holder_name else None
+    # analyze() already converts a screening outage into a manual-review case, so
+    # here we only need to avoid reporting an unscreened holder as clean.
+    try:
+        holder_hit = sanctions.screen(body.account_holder_name) if body.account_holder_name else None
+    except sanctions.ScreeningUnavailable as e:
+        log.error(f"Account-holder screening unavailable for {body.external_id}: {e}")
+        holder_hit = None
+        result.is_fraudulent, result.confidence = True, "HIGH"
+        result.fraud_type = result.fraud_type or "screening unavailable"
+        result.sanctions_detail = f"NOT SCREENED — {e}"
+        result.reasons = [
+            f"MANUAL SANCTIONS SCREENING REQUIRED — account holder "
+            f"'{body.account_holder_name}' was NOT screened against the OFAC list ({e})."
+        ] + result.reasons
     if holder_hit and holder_hit.list_type == "SDN":
         result.sanctions_hit = True
         detail = (f"Account holder '{body.account_holder_name}' matches {holder_hit.source} entry "
@@ -178,10 +191,13 @@ async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
             "created_at": str(case.created_at),
         }
         await broadcaster.broadcast({"event": "new_case", "case": payload})
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, emailer.send_fraud_alert, payload)
-        loop.run_in_executor(None, emailer.send_webhook_alert, payload)
-        loop.run_in_executor(None, callbacks.post_event, "case.flagged", callbacks.case_payload(case))
+        # Dispatched on the dedicated notification pool so a hung mail or webhook
+        # endpoint cannot starve the executor shared with OFAC refresh and
+        # directory auth; failures are logged rather than silently discarded.
+        notify.submit(emailer.send_fraud_alert, payload, label="email:fraud_alert")
+        notify.submit(emailer.send_webhook_alert, payload, label="webhook:fraud_alert")
+        notify.submit(callbacks.post_event, "case.flagged", callbacks.case_payload(case),
+                      label="callback:case.flagged")
 
     return _verdict(case)
 

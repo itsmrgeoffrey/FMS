@@ -4,10 +4,14 @@ import threading
 import pyodbc
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from backend.adapters.base import BaseAdapter, NormalizedTransaction, validate_identifier
+from backend.adapters.base import (
+    BaseAdapter, NormalizedTransaction, validate_identifier,
+    CONNECT_TIMEOUT_SECONDS, QUERY_TIMEOUT_SECONDS,
+)
 
 log = logging.getLogger(__name__)
-_executor = ThreadPoolExecutor(max_workers=4)
+_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="fms-mssql")
+
 
 
 class MSSQLAdapter(BaseAdapter):
@@ -53,8 +57,25 @@ class MSSQLAdapter(BaseAdapter):
 
     async def connect(self) -> None:
         conn_str = self._make_conn_str()
-        self._conn = await self._submit(lambda: pyodbc.connect(conn_str, autocommit=True))
-        log.info("Connected to bank MSSQL database")
+
+        def _open():
+            # Two DIFFERENT timeouts, both required:
+            #   pyodbc.connect(timeout=)  -> LOGIN timeout (establishing the session)
+            #   conn.timeout              -> QUERY timeout (per statement)
+            # Without the second, a bank database that accepts the connection and
+            # then stops responding holds _lock forever. Every other bank-DB
+            # operation — the poller, the dashboard's is_connected() check, the
+            # Administration test-connection button — queues behind it with no
+            # recovery short of a process restart.
+            conn = pyodbc.connect(conn_str, autocommit=True, timeout=CONNECT_TIMEOUT_SECONDS)
+            conn.timeout = QUERY_TIMEOUT_SECONDS
+            return conn
+
+        self._conn = await self._submit(_open)
+        log.info(
+            "Connected to bank MSSQL database (login timeout %ss, query timeout %ss)",
+            CONNECT_TIMEOUT_SECONDS, QUERY_TIMEOUT_SECONDS,
+        )
 
     async def disconnect(self) -> None:
         if self._conn:

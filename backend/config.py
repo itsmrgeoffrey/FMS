@@ -18,7 +18,13 @@ ENV_FILE = os.getenv("FMS_ENV_FILE", "").strip() or str(ROOT / ".env")
 load_dotenv(ENV_FILE)
 
 APP_VERSION = "0.1.0"
-ENVIRONMENT = os.getenv("FMS_ENV", "development")
+# Defaults to "production" deliberately: this value gates the first-admin signup
+# bootstrap (backend/routers/auth_routes.py) and the demo transaction-injection
+# endpoint (backend/routers/transactions.py). Defaulting to "development" meant
+# an operator who simply forgot to set FMS_ENV got an open admin bootstrap and a
+# live write path into the bank database. An unset variable must fail SAFE, so
+# development mode is now opt-in: set FMS_ENV=development locally.
+ENVIRONMENT = os.getenv("FMS_ENV", "production")
 
 
 class Settings(BaseSettings):

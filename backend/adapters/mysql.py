@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 import aiomysql
-from backend.adapters.base import BaseAdapter, NormalizedTransaction, validate_identifier
+from backend.adapters.base import BaseAdapter, NormalizedTransaction, validate_identifier, CONNECT_TIMEOUT_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -13,6 +13,9 @@ class MySQLAdapter(BaseAdapter):
         self._pool: aiomysql.Pool | None = None
 
     async def connect(self) -> None:
+        # connect_timeout bounds session establishment; without it a bank host
+        # that drops packets rather than refusing leaves the poller waiting on
+        # the OS default, which is minutes.
         self._pool = await aiomysql.create_pool(
             host=self._db_cfg["host"],
             port=int(self._db_cfg.get("port", 3306)),
@@ -22,8 +25,9 @@ class MySQLAdapter(BaseAdapter):
             autocommit=True,
             minsize=1,
             maxsize=5,
+            connect_timeout=CONNECT_TIMEOUT_SECONDS,
         )
-        log.info("Connected to bank MySQL database")
+        log.info("Connected to bank MySQL database (connect timeout %ss)", CONNECT_TIMEOUT_SECONDS)
 
     async def disconnect(self) -> None:
         if self._pool:

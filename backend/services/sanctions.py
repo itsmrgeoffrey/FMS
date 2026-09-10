@@ -26,6 +26,7 @@ here is name-based only.
 """
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -84,6 +85,39 @@ def _normalize(name: str | None) -> str:
 
 
 _entries: list[dict] | None = None
+
+# ─── Screening health ────────────────────────────────────────────────────────
+# Screening is the control that produces the most serious output FMS can emit
+# (an OFAC block/reject obligation). It must therefore never fail SILENTLY: a
+# list that failed to load looks exactly like a list on which nothing matched,
+# and "no match" would be reported to the caller as a clean transaction.
+#
+# Three states, tracked explicitly and exposed through status():
+#   "ok"      — the downloaded OFAC list loaded and is above the sanity floor.
+#   "sample"  — no downloaded list present; screening runs against the bundled
+#               SAMPLE. Legitimate for demo/CI, NOT acceptable in production —
+#               reported as degraded so the caller can flag for manual review.
+#   "error"   — a list file exists but could not be read, or parsed to fewer
+#               entries than the floor (e.g. a truncated file, or a refresh that
+#               wrote an error page). screen() RAISES in this state rather than
+#               returning None.
+#
+# The floor guards the specific failure where a 200-OK maintenance page parses
+# to ~0 rows and overwrites a good list: the real SDN list is tens of thousands
+# of names, so anything under the floor is a broken file, not a short list.
+MIN_FULL_LIST_ENTRIES = int(os.getenv("FMS_MIN_SDN_ENTRIES", "1000"))
+
+_state: str = "ok"           # "ok" | "sample" | "error"
+_state_detail: str = ""
+
+
+class ScreeningUnavailable(RuntimeError):
+    """Raised by screen() when the sanctions list could not be loaded.
+
+    Callers must treat this as "screening did not run" — never as "no match".
+    """
+
+
 # Performance indexes over _entries, built at load time. With the full OFAC list
 # (~40k names) a linear fuzzy scan costs seconds per screen; the trigram index
 # narrows each query to a small candidate set before any similarity scoring,
@@ -125,18 +159,30 @@ def _build_indexes() -> None:
 
 
 def _load() -> list[dict]:
-    """Load and cache the sanctions list. Prefers the full list, falls back to sample."""
-    global _entries
+    """Load and cache the sanctions list. Prefers the full list, falls back to sample.
+
+    Records the resulting health state in _state so a failed load can never be
+    mistaken for a clean screening result — see the "Screening health" note above.
+    """
+    global _entries, _state, _state_detail
     if _entries is not None:
         return _entries
 
-    path = _FULL_LIST if _FULL_LIST.exists() else _SAMPLE_LIST
+    using_full = _FULL_LIST.exists()
+    path = _FULL_LIST if using_full else _SAMPLE_LIST
+    primary_failed: str | None = None
 
-    def read(p: Path, default_source: str, list_type: str) -> list[dict]:
+    def read(p: Path, default_source: str, list_type: str, primary: bool = False) -> list[dict]:
+        nonlocal primary_failed
         try:
             raw = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
-            log.warning(f"Could not load screening list from {p}: {e}")
+            # A supplementary list that won't parse degrades coverage; the PRIMARY
+            # list failing means we are not screening at all, and that has to be
+            # loud rather than an empty result set.
+            log.error(f"Could not load screening list from {p}: {e}")
+            if primary:
+                primary_failed = f"{p.name}: {e}"
             return []
         return [
             {
@@ -151,7 +197,33 @@ def _load() -> list[dict]:
             if r.get("name")
         ]
 
-    _entries = read(path, "OFAC SDN", "SDN")
+    _entries = read(path, "OFAC SDN", "SDN", primary=True)
+
+    # Classify screening health before anything is allowed to use the list.
+    if primary_failed:
+        _state, _state_detail = "error", f"screening list unreadable — {primary_failed}"
+    elif using_full and len(_entries) < MIN_FULL_LIST_ENTRIES:
+        # The real SDN list is tens of thousands of names. A handful means a
+        # truncated file or a refresh that wrote an error page over a good list.
+        _state = "error"
+        _state_detail = (
+            f"downloaded OFAC list has only {len(_entries)} entries, below the "
+            f"{MIN_FULL_LIST_ENTRIES} minimum — treating as corrupt, not as a short list"
+        )
+    elif not using_full:
+        _state = "sample"
+        _state_detail = (
+            "no downloaded OFAC list present — screening against the bundled SAMPLE. "
+            "Run scripts/update_ofac.py (or enable FMS_OFAC_REFRESH_HOURS) before production use."
+        )
+    else:
+        _state, _state_detail = "ok", ""
+
+    if _state == "error":
+        log.error(f"SANCTIONS SCREENING UNAVAILABLE — {_state_detail}")
+    elif _state == "sample":
+        log.warning(f"Sanctions screening DEGRADED — {_state_detail}")
+
     if _CONSOLIDATED_LIST.exists():
         cons = read(_CONSOLIDATED_LIST, "OFAC Consolidated (non-SDN)", "NON_SDN")
         _entries += cons
@@ -187,6 +259,30 @@ def reload() -> int:
     global _entries
     _entries = None
     return len(_load())
+
+
+def status() -> dict:
+    """Current screening health, for the status page and the ingestion path.
+
+    ``ok`` False means a transaction screened right now would NOT have been
+    checked against the live OFAC list. Callers must surface that rather than
+    reporting the transaction as clean.
+    """
+    _load()  # ensure state is populated
+    return {
+        "state": _state,                       # ok | sample | error
+        "ok": _state == "ok",
+        "detail": _state_detail,
+        "entries": len(_entries or []),
+        "minimum_entries": MIN_FULL_LIST_ENTRIES,
+        "using_full_list": has_full_list(),
+        "list_age_hours": list_age_hours(),
+    }
+
+
+def screening_ok() -> bool:
+    """True only when screening is running against the live OFAC list."""
+    return status()["ok"]
 
 
 def has_full_list() -> bool:
@@ -252,11 +348,21 @@ def refresh_from_treasury() -> int:
     with httpx.Client(follow_redirects=True, timeout=120) as client:
         sdn_raw = client.get("https://www.treasury.gov/ofac/downloads/sdn.csv").raise_for_status().content.decode("latin-1")
         alt_raw = client.get("https://www.treasury.gov/ofac/downloads/alt.csv").raise_for_status().content.decode("latin-1")
+
+        parsed = _parse_ofac_csv(sdn_raw, alt_raw, "OFAC SDN")
+        # raise_for_status() catches an HTTP error, but not a 200-OK maintenance
+        # or error page — which parses to near-zero rows and would otherwise
+        # overwrite a good list with an empty one, silently disabling screening.
+        # Refuse to write anything that isn't plausibly the real SDN list.
+        if len(parsed) < MIN_FULL_LIST_ENTRIES:
+            raise RuntimeError(
+                f"OFAC download parsed to only {len(parsed)} entries (minimum "
+                f"{MIN_FULL_LIST_ENTRIES}) — refusing to overwrite the existing list. "
+                f"The download was most likely an error page rather than sdn.csv."
+            )
+
         _FULL_LIST.parent.mkdir(exist_ok=True)
-        _FULL_LIST.write_text(
-            _json.dumps(_parse_ofac_csv(sdn_raw, alt_raw, "OFAC SDN"), ensure_ascii=False),
-            encoding="utf-8",
-        )
+        _FULL_LIST.write_text(_json.dumps(parsed, ensure_ascii=False), encoding="utf-8")
 
         try:
             cons_raw = client.get("https://www.treasury.gov/ofac/downloads/consolidated/cons_prim.csv").raise_for_status().content.decode("latin-1")
@@ -292,12 +398,19 @@ def _make_match(name: str | None, e: dict, score: float) -> SanctionsMatch:
 
 
 def screen(name: str | None, threshold: float = DEFAULT_THRESHOLD) -> SanctionsMatch | None:
-    """Return the best sanctions match for `name` at/above `threshold`, else None."""
+    """Return the best sanctions match for `name` at/above `threshold`, else None.
+
+    Raises ScreeningUnavailable when the list could not be loaded. A None return
+    therefore always means "screened, no match" — never "could not screen".
+    """
+    entries = _load()
+    if _state == "error":
+        raise ScreeningUnavailable(_state_detail)
+
     q = _normalize(name)
     if not q:
         return None
 
-    entries = _load()
     cache_key = (q, threshold)
     if cache_key in _screen_cache:
         return _screen_cache[cache_key]
