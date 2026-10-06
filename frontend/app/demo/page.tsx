@@ -41,7 +41,8 @@ export default function DemoPage() {
   const [lastReference, setLastReference] = useState("");
 
   const [form, setForm] = useState({
-    account_id: "0123456789",
+    account_id: "",
+    account_holder_name: "",
     amount: "",
     currency: "USD",
     beneficiary_account: "",
@@ -76,6 +77,10 @@ export default function DemoPage() {
     if (acctError && val.length === 10) setAcctError("");
   }
 
+  function handleMonitoredAccountChange(e: React.ChangeEvent<HTMLInputElement>) {
+    set("account_id", e.target.value.replace(/\D/g, "").slice(0, 10));
+  }
+
   function handleAcctBlur() {
     const val = form.beneficiary_account;
     if (!val) return;
@@ -84,11 +89,19 @@ export default function DemoPage() {
       set("beneficiary_name", "");
     } else {
       setAcctError("");
-    setLastReference("");
-      // Test validation — auto-populate name
-      set("beneficiary_name", "Larry Bird");
+      setLastReference("");
     }
   }
+
+  const monitoredAccountReady = form.account_id.length === 10;
+  const counterpartyReady = direction === "OUTWARD"
+    ? form.beneficiary_account.length === 10
+    : form.sender_account.length === 10;
+  const canContinue = Boolean(form.amount)
+    && parseFloat(form.amount) > 0
+    && monitoredAccountReady
+    && counterpartyReady
+    && !acctError;
 
   async function submit() {
     setStage("processing");
@@ -108,6 +121,7 @@ export default function DemoPage() {
         reference,
         counterparty_account: direction === "OUTWARD" ? form.beneficiary_account : form.sender_account,
         counterparty_name: direction === "OUTWARD" ? form.beneficiary_name : form.sender_name,
+        account_holder_name: form.account_holder_name || undefined,
       };
       const token = auth.token();
       const res = await fetch("/api/ingest/simulate", {
@@ -152,10 +166,12 @@ export default function DemoPage() {
             <div className="bg-[#0A1628] pt-10 pb-6 px-6 rounded-b-[32px]">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-sm">TI</div>
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-sm">
+                    {(form.account_holder_name || "TS").slice(0, 2).toUpperCase()}
+                  </div>
                   <div>
                     <p className="text-gray-400 text-xs">Good day,</p>
-                    <p className="text-white font-semibold text-sm">Tochukwu Iloani</p>
+                    <p className="text-white font-semibold text-sm">{form.account_holder_name || "Transaction source"}</p>
                   </div>
                 </div>
                 <button className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
@@ -179,7 +195,7 @@ export default function DemoPage() {
                 <p className="text-white text-2xl font-bold tracking-tight">
                   {showBalance ? "$24,500.00" : "$••••••••"}
                 </p>
-                <p className="text-blue-200 text-xs mt-1">Acc: 0123456789</p>
+                <p className="text-blue-200 text-xs mt-1">Acc: {form.account_id || "not selected"}</p>
               </div>
             </div>
 
@@ -266,6 +282,35 @@ export default function DemoPage() {
                   />
                 </div>
                 <div className="h-px bg-gray-100 mt-3" />
+                <div className="mt-3">
+                  <label className="text-xs text-gray-400 mb-1 block">
+                    {direction === "OUTWARD" ? "From Account" : "Receiving Account"}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="10-digit account number"
+                    value={form.account_id}
+                    onChange={handleMonitoredAccountChange}
+                    maxLength={10}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                  {form.account_id.length > 0 && !monitoredAccountReady && (
+                    <p className="text-gray-400 text-xs mt-1">{form.account_id.length}/10 digits</p>
+                  )}
+                </div>
+                <div className="mt-3">
+                  <label className="text-xs text-gray-400 mb-1 block">
+                    {direction === "OUTWARD" ? "Source Name" : "Receiver Name"}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Optional account holder"
+                    value={form.account_holder_name}
+                    onChange={e => set("account_holder_name", e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
                 <p className="text-gray-400 text-xs mt-2">Balance: $24,500.00</p>
               </div>
 
@@ -348,7 +393,7 @@ export default function DemoPage() {
             <div className="px-6 py-4 bg-white border-t border-gray-100">
               <button
                 onClick={() => setStage("confirm")}
-                disabled={!form.amount || parseFloat(form.amount) <= 0 || !!acctError}
+                disabled={!canContinue}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold py-4 rounded-2xl transition-colors text-sm"
               >
                 Continue
@@ -379,7 +424,7 @@ export default function DemoPage() {
 
               <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
                 {[
-                  { label: "From", value: `Tochukwu Iloani · ${form.account_id}` },
+                  { label: direction === "OUTWARD" ? "From" : "To", value: `${form.account_holder_name || "Source account"} · ${form.account_id}` },
                   { label: direction === "OUTWARD" ? "To" : "From", value: `${direction === "OUTWARD" ? form.beneficiary_name : form.sender_name} · ${direction === "OUTWARD" ? form.beneficiary_account : form.sender_account}` },
                   { label: "Channel", value: form.channel },
                   { label: "Narration", value: form.narration || "—" },

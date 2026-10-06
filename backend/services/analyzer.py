@@ -257,6 +257,15 @@ class FraudAnalysis:
     sanctions_detail: str = ""
 
 
+def initial_case_status(is_fraudulent: bool, ctr_required: bool, sar_recommended: bool) -> str:
+    """Workflow status for a newly analyzed transaction.
+
+    CTR is not fraud evidence, but it is still an officer action item. Keeping
+    CTR-only transactions open prevents them from being hidden as clean activity.
+    """
+    return "OPEN" if is_fraudulent or ctr_required or sar_recommended else "CLEAN"
+
+
 # ─── CTR obligation assessment ────────────────────────────────────────────────
 
 def _assess_ctr(

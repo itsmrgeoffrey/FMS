@@ -83,6 +83,14 @@ def test_ctr_not_required_below_threshold():
     assert not ctr.required
 
 
+def test_ctr_required_stays_open_for_review_even_without_fraud_signal():
+    assert A.initial_case_status(False, True, False) == "OPEN"
+
+
+def test_only_clean_transactions_are_closed_clean():
+    assert A.initial_case_status(False, False, False) == "CLEAN"
+
+
 # ─── Risk scoring behaviour ─────────────────────────────────────────────────
 
 def test_consistent_activity_scores_low():

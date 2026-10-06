@@ -160,7 +160,11 @@ async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
         sanctions_hit=result.sanctions_hit, sanctions_detail=result.sanctions_detail,
         confidence=result.confidence, fraud_type=result.fraud_type,
         reasons=result.reasons, ai_summary=result.summary,
-        status="OPEN" if result.is_fraudulent else "CLEAN",
+        status=analyzer.initial_case_status(
+            result.is_fraudulent,
+            result.ctr_required,
+            result.sar_recommended,
+        ),
     )
     async with SessionLocal() as wdb:
         wdb.add(case)

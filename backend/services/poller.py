@@ -114,7 +114,11 @@ async def _process_table(adapter: BaseAdapter, table_key: str, history_days: int
             # cause a transaction to be silently dropped.
             result = await analyzer.analyze(txn, history)
 
-            status = "OPEN" if result.is_fraudulent else "CLEAN"
+            status = analyzer.initial_case_status(
+                result.is_fraudulent,
+                result.ctr_required,
+                result.sar_recommended,
+            )
             case = FraudCase(
                 source_table=txn.source_table,
                 source_txn_id=txn.id,

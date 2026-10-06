@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, type DateRange } from "@/lib/api";
 import DateRangePicker from "@/components/DateRangePicker";
@@ -13,20 +13,49 @@ function fmtDate(ts: string) {
   return new Date(ts).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
 }
 
+function needsReview(c: FraudCaseListItem) {
+  return c.status !== "CLEAN" || c.ctr_required || c.sar_recommended || c.sanctions_hit;
+}
+
+function ResultBadge({ c }: { c: FraudCaseListItem }) {
+  if (c.ctr_required && c.status === "CLEAN") {
+    return <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">CTR required</span>;
+  }
+  if (c.status === "CLEAN") {
+    return <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-700">clean</span>;
+  }
+  const flags = [
+    c.ctr_required ? "CTR" : "",
+    c.sar_recommended ? "SAR" : "",
+    c.sanctions_hit ? "sanctions" : "",
+  ].filter(Boolean);
+  const suffix = flags.length ? ` · ${flags.join(" · ")}` : "";
+  return <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-red-50 text-red-700">flagged{suffix} · risk {c.risk_score}</span>;
+}
+
 export default function TransactionsPage() {
   const [items, setItems] = useState<FraudCaseListItem[]>([]);
   const [filter, setFilter] = useState<"all" | "flagged" | "clean">("all");
   const [range, setRange] = useState<DateRange>({});
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    api.getCases({ limit: 100, ...range }).then((p) => setItems(p.items)).catch(() => {}).finally(() => setLoading(false));
+  useEffect(() => {
+    let cancelled = false;
+    api.getCases({ limit: 100, ...range })
+      .then((p) => {
+        if (!cancelled) setItems(p.items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [range]);
-  useEffect(() => { load(); }, [load]);
 
   const shown = items.filter((c) =>
-    filter === "all" ? true : filter === "clean" ? c.status === "CLEAN" : c.status !== "CLEAN"
+    filter === "all" ? true : filter === "clean" ? !needsReview(c) : needsReview(c)
   );
 
   return (
@@ -78,14 +107,10 @@ export default function TransactionsPage() {
                 </td>
                 <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.counterparty_name || "—"}</td>
                 <td className="px-4 py-3">
-                  {c.status === "CLEAN" ? (
-                    <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-700">clean</span>
-                  ) : (
-                    <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-red-50 text-red-700">flagged · risk {c.risk_score}</span>
-                  )}
+                  <ResultBadge c={c} />
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {c.status !== "CLEAN" && <Link href={`/cases/${c.id}`} className="text-blue-600 hover:text-blue-800 font-medium text-xs">View →</Link>}
+                  {needsReview(c) && <Link href={`/cases/${c.id}`} className="text-blue-600 hover:text-blue-800 font-medium text-xs">View →</Link>}
                 </td>
               </tr>
             ))}
