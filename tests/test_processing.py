@@ -144,6 +144,21 @@ def test_api_routing_pagination_assessments_and_logout(store, monkeypatch):
             assert review["total"] == 2 and review["items"][0]["source_table"] == "legacy"
             assert review["items"][0]["assessment"]["version"] == "legacy"
             assert len((await client.get("/cases?review_required=true&limit=1&page=2")).json()["items"]) == 1
+            # Queue filters apply before pagination and search treats LIKE tokens literally.
+            filtered = (await client.get("/cases", params={"review_required": "true", "search": "account-one", "flag": "ctr", "limit": 1})).json()
+            assert filtered["total"] == 2 and len(filtered["items"]) == 1
+            assert (await client.get("/cases", params={"search": "ACCOUNT-TWO"})).json()["total"] == 1
+            assert (await client.get("/cases", params={"search": "legacy", "min_risk": 76})).json()["total"] == 1
+            assert (await client.get("/cases", params={"status": "ESCALATED", "flag": "ctr"})).json()["total"] == 1
+            for term in ("%", "_", "not-present"):
+                assert (await client.get("/cases", params={"search": term})).json()["total"] == 0
+            for params in ({"flag": "invalid"}, {"min_risk": 101}, {"min_risk": -1}, {"search": "x" * 201}):
+                assert (await client.get("/cases", params=params)).status_code == 422
+            overview = (await client.get("/stats/dashboard")).json()
+            legacy_attention = next(item for item in overview["attention"] if item["id"] == legacy.id)
+            assert legacy_attention["ctr_required"] and legacy_attention["status"] == "CLEAN"
+            assert legacy_attention["assessment"]["version"] == "legacy"
+            assert legacy_attention["source_table"] == "legacy"
             replay = await client.post("/rules/backtest", json={"proposed": {}})
             assert replay.status_code == 200 and replay.json()["current"]["ctr_required"] == 1
             assert (await client.post("/auth/logout")).status_code == 200

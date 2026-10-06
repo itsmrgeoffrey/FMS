@@ -14,6 +14,7 @@ This document supersedes older pipeline excerpts and regulatory claims in the Ju
 - Account-holder and counterparty screening use the same path. Name matches are candidates for identity verification. Missing names, unusable lists, and stale lists require review, never an implied clean screening result. List freshness is checked against twice the configured refresh interval, with a 24-hour minimum.
 - Logout revokes the token. Password, role, and active-status changes invalidate older sessions. WebSockets recheck authorization before sending case data. Existing sessions must sign in again after this update.
 - Alerts and Transactions use server-side filters and pagination, with visible load errors. The simulator displays an assessment, not a successful funds transfer.
+- Dashboard puts highest-risk open reviews first and labels current versus all-time indicators. Alerts supports full-queue account/source/reference search, status, reporting flags, minimum risk, and sorting; mobile entries show amount, flags, risk and status without a wide table. Transaction Details separates detection, screening and reporting, exposes source identifiers, and asks for confirmation before terminal dispositions. Existing colours and navigation are retained. Investigation workspaces and report filing are still deferred.
 
 ## Reporting Boundaries
 
@@ -52,4 +53,4 @@ The Python environment audit and frontend production-dependency audit reported z
 
 See [ROADMAP.md](../ROADMAP.md) for features intentionally not built in this phase.
 
-Focused lint checks cover the changed transaction/review controls. The pre-existing synchronous state initialization in `AppShell` still fails the stricter React effect lint rule; a broad UI cleanup remains deferred. A successful production build is not a claim that every existing lint warning or UI issue has been resolved.
+Focused lint checks cover Dashboard, Alerts, Transaction Details, and their changed shared controls. The UI pass passed the production build and 88 Python tests, including server-filter and dashboard-contract coverage. Local browser checks cover desktop/mobile layouts, search, filter/reset behaviour, decision confirmation and review audit updates using synthetic data. The pre-existing synchronous state initialization in `AppShell` still fails the stricter React effect lint rule; a broad UI cleanup remains deferred. A successful production build is not a claim that every existing lint warning or UI issue has been resolved.

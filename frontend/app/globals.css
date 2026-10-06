@@ -10,3 +10,16 @@ body {
   color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
+
+.review-page { max-width: 1440px; margin: 0 auto; padding: 28px; letter-spacing: 0; }
+.review-page h1 { font-size: 24px; font-weight: 700; line-height: 1.3; }
+.review-page h2 { font-size: 15px; font-weight: 600; }
+.review-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border: 1px solid #e5e7eb; border-radius: 6px; background: white; color: #475569; }
+.review-icon:hover { background: #eff6ff; color: #1d4ed8; }
+.review-icon:disabled { opacity: .45; cursor: wait; }
+.review-tag { display: inline-flex; padding: 3px 7px; border-radius: 4px; font-size: 11px; font-weight: 500; line-height: 1.4; }
+.review-input { width: 100%; min-height: 38px; border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 10px; background: white; font-size: 13px; color: #111827; }
+.review-page :is(a, button, input, select, textarea):focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.review-section { border-top: 1px solid #e5e7eb; padding-top: 24px; margin-top: 24px; }
+@media (max-width: 640px) { .review-page { padding: 20px 16px; } }
+@media (prefers-reduced-motion: reduce) { .review-page * { animation: none !important; transition: none !important; } }

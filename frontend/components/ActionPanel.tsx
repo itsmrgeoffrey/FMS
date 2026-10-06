@@ -23,6 +23,7 @@ export function ActionPanel({
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
 
   const isFinal = FINAL_STATUSES.has(caseData.status);
 
@@ -33,6 +34,7 @@ export function ActionPanel({
       const updated = await api.addAction(caseData.id, action, note.trim() || undefined);
       onUpdate(updated);
       setNote("");
+      setPending(null);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -66,26 +68,36 @@ export function ActionPanel({
 
   return (
     <div className="space-y-4">
+      <label htmlFor="disposition-note" className="block text-xs font-medium text-gray-600">Disposition reason</label>
       <textarea
+        id="disposition-note"
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="Reason for disposition"
-        rows={2}
+        rows={4}
         className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
       />
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
         {ACTIONS.map((a) => (
           <button
             key={a.key}
-            onClick={() => handleAction(a.key)}
-            disabled={loading !== null || (a.key !== "REVIEW" && !note.trim())}
+            onClick={() => a.key === "CONFIRMED" || a.key === "DISMISSED" ? setPending(a.key) : handleAction(a.key)}
+            disabled={loading !== null || pending !== null || (a.key !== "REVIEW" && !note.trim()) || (a.key === "REVIEW" && caseData.status === "UNDER_REVIEW")}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${a.style}`}
           >
             {loading === a.key ? "Saving..." : a.label}
           </button>
         ))}
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {pending && <div className="border-t border-gray-200 pt-4" role="group" aria-label="Confirm disposition">
+        <p className="text-sm font-medium text-gray-800">{pending === "CONFIRMED" ? "Confirm fraud" : "Dismiss"} for {caseData.account_id}?</p>
+        <p className="mt-2 text-xs text-gray-500">This closes the case. Reporting flags remain unchanged.</p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          <button disabled={loading !== null || !note.trim()} onClick={() => handleAction(pending)} className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">{loading ? "Saving..." : "Confirm decision"}</button>
+          <button disabled={loading !== null} onClick={() => setPending(null)} className="px-2 py-2 text-sm text-gray-600">Cancel</button>
+        </div>
+      </div>}
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     </div>
   );
 }

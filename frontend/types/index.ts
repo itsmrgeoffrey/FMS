@@ -115,6 +115,11 @@ export interface Dashboard {
   risk_levels: { level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; count: number }[];
   amounts_open: { currency: string; total: number }[];
   attention: {
+    source_table: string;
+    channel: string | null;
+    ctr_required: boolean;
+    status: string;
+    assessment?: Assessment;
     id: string;
     account_id: string;
     amount: number;

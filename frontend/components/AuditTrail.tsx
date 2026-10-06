@@ -36,9 +36,9 @@ export function AuditTrail({ actions }: { actions: CaseAction[] }) {
             <p className="text-sm font-medium text-gray-800">
               {actionLabels[a.action] ?? a.action}
             </p>
-            <p className="text-xs text-gray-400">{a.actor} · {fmtDate(a.created_at)}</p>
+            <p className="break-words text-xs text-gray-500">{a.actor} · {fmtDate(a.created_at)}</p>
             {a.note && (
-              <p className="text-sm text-gray-600 mt-1 bg-gray-50 px-3 py-2 rounded border border-gray-100">
+              <p className="break-words whitespace-pre-wrap text-sm text-gray-600 mt-1 [overflow-wrap:anywhere]">
                 {a.note}
               </p>
             )}

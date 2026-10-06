@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,9 @@ async def list_cases(
     review_required: bool | None = Query(None),
     result: str | None = Query(None, pattern="^(flagged|clean)$"),
     sort: str = Query("recent", pattern="^(recent|risk)$"),
+    search: str | None = Query(None, max_length=200),
+    flag: str | None = Query(None, pattern="^(ctr|sar|sanctions)$"),
+    min_risk: int | None = Query(None, ge=0, le=100),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     page: int = Query(1, ge=1),
@@ -46,6 +49,19 @@ async def list_cases(
         filters.append(FraudCase.status == status)
     if confidence:
         filters.append(FraudCase.confidence == confidence)
+    if search and search.strip():
+        # Escape LIKE metacharacters so account identifiers are searched literally.
+        term = search.strip().replace("/", "//").replace("%", "/%").replace("_", "/_")
+        filters.append(or_(*(column.ilike(f"%{term}%", escape="/") for column in (
+            FraudCase.account_id, FraudCase.counterparty_account, FraudCase.counterparty_name,
+            FraudCase.source_table, FraudCase.source_txn_id, FraudCase.channel,
+            FraudCase.reference, FraudCase.id,
+        ))))
+    if flag:
+        filters.append({"ctr": FraudCase.ctr_required, "sar": FraudCase.sar_recommended,
+                        "sanctions": FraudCase.sanctions_hit}[flag].is_(True))
+    if min_risk is not None:
+        filters.append(FraudCase.risk_score >= min_risk)
     if date_from:
         filters.append(FraudCase.created_at >= datetime.combine(date_from, datetime.min.time()))
     if date_to:

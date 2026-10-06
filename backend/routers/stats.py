@@ -137,6 +137,8 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
             "id": c.id, "account_id": c.account_id, "amount": c.amount, "currency": c.currency,
             "direction": c.direction, "fraud_type": c.fraud_type, "risk_score": c.risk_score,
             "sanctions_hit": c.sanctions_hit, "sar_recommended": c.sar_recommended,
+            "ctr_required": c.ctr_required, "status": c.status, "assessment": c.assessment,
+            "source_table": c.source_table, "channel": c.channel,
             "created_at": str(c.created_at),
         }
         for c in q.scalars().all()
