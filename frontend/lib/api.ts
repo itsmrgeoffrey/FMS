@@ -250,7 +250,8 @@ export const api = {
     req(`/audit/security${qs({ limit, ...range })}`),
 
   // Account + user management
-  changePassword: (current_password: string, new_password: string): Promise<{ changed: boolean }> =>
+  logout: (): Promise<{ signed_out: boolean }> => req("/auth/logout", { method: "POST" }),
+  changePassword: (current_password: string, new_password: string): Promise<{ changed: boolean; token: string; user: AuthUser }> =>
     req("/auth/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

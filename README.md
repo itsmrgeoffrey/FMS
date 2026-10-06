@@ -21,13 +21,13 @@ Financial-crime detection protects the integrity of the payment system — money
   - Inbound multi-source "smurfing" and same-counterparty accumulation
   - Behavioral deviation from an account's own baseline
   - New counterparty / new channel / odd-hours signals
-  - Payroll/batch suppression so legitimate bulk runs don't false-positive
+  - Untrusted payroll references and batch IDs never suppress detection
 - **Sanctions & watch-list screening** — every party is screened against the OFAC SDN list (block-or-reject case regardless of risk score) and the OFAC Consolidated non-SDN lists (review-required case), both refreshed by `scripts/update_ofac.py`. Bring-your-own lists (UN/EU/UK or internal) via `data/extra_lists/*.json`, plus optional PEP list support (`data/pep.json`) for enhanced-due-diligence flags.
 - **FinCEN 314(a) batch scan** — upload the 314(a) subject list and FMS scans it against every account holder and counterparty it has seen (in memory; the list is never stored). Positive matches are the institution's to verify and report via FinCEN's SISS.
 - **Institutional risk assessment** — the documented, versioned ML/TF risk assessment FinCEN's 2026 Program rule proposal **would require** (proposed, not yet final — but the direction of travel): a rated category grid (products/customers/geographies/channels), the National AML/CFT Priorities checklist pre-mapped to FMS detection coverage, and an activity snapshot auto-filled from your own case data. FMS structures it; the ratings are the officer's.
 - **Rule backtesting + tuning log** — test a threshold change against your stored history ("what would this have flagged?") before saving it; every change is recorded with before/after values, actor, rationale, and the backtest evidence — the documented-review trail examiners ask for.
-- **CTR assessment** — single-transaction and same-day aggregate detection against currency-aware thresholds (FinCEN USD $10,000 and local equivalents).
-- **SAR assessment** — recommends a Suspicious Activity Report for structuring/smurfing (any amount) and for suspicious activity at/above the SAR threshold, with **30-day filing-deadline tracking**.
+- **CTR assessment** — US-bank USD cash above $10,000, individually or as a same-direction business-day account aggregate, requires officer review. Electronic transfers do not automatically trigger CTR. Missing classification or unsupported jurisdictions require manual assessment.
+- **SAR assessment** — suspicious US-bank USD activity at least $5,000 is surfaced for officer assessment. This is not a filing determination; existing date reminders are provisional, not a reporting lifecycle.
 - **FinCEN filing worksheets + draft batch XML** — `/reports/ctr?format=fincen` and `/reports/sar?format=fincen` emit Form 112 / Form 111 field structures pre-filled from transaction data, with explicit lists of what still needs KYC records and officer review. `?format=xml` produces a **draft** batch file structured after the FinCEN E-Filing format, with every incomplete item marked — the officer completes it and validates it in FinCEN's batch validator before upload.
 - **Plain-English case summaries** — an LLM writes an officer-readable explanation, with a **deterministic fallback** so an AI outage never blocks a case from being created. Point `LLM_BASE_URL` at a local OpenAI-compatible endpoint (e.g. Ollama) and no transaction data leaves your infrastructure.
 - **Case management + audit trail** — open / under-review / confirmed / dismissed / escalated, every action attributed to a named actor.
@@ -117,7 +117,7 @@ On first run FMS records a checkpoint and begins monitoring transactions created
 - **`bank_config.yaml`** — selects the ingestion mode (`monitoring.mode`). In **API-push** mode (the default, recommended) you don't need this file at all — transactions arrive via `POST /ingest/transactions` and no database block is required. In **database-poll** mode it holds the read-only DB connection and a column mapping from your schema to FMS's normalized fields (MySQL / SQL Server / PostgreSQL / Oracle). Copy [`bank_config.example.yaml`](bank_config.example.yaml), which documents both modes. It is git-ignored so real credentials never get committed.
 - **`.env`** — `GROQ_API_KEY` (case summaries), optional `GMAIL_USER` / `GMAIL_APP_PASSWORD` / `ALERT_EMAIL` (alerts), and optional `FMS_API_KEY` (API auth).
 
-Currency-aware CTR/SAR thresholds live in `backend/services/analyzer.py` and are easy to extend for new jurisdictions.
+Behavioral currency benchmarks live in `backend/services/analyzer.py`; they are not foreign reporting laws. See [Current Scope](docs/CURRENT_SCOPE.md) for cash classification, reporting limits, exact-money snapshots, recovery, single-worker deployment, and verification. See [Roadmap](ROADMAP.md) for explicitly deferred features.
 
 ## Security
 

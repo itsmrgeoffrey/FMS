@@ -28,7 +28,6 @@ export default function RulesPage() {
         structuring_band_ratio: String(c.detection_parameters.structuring_band_ratio),
         rolling_window_days: String(c.detection_parameters.rolling_window_days),
         smurfing_window_hours: String(c.detection_parameters.smurfing_window_hours),
-        sar_ratio: String(c.regulatory_thresholds.sar_ratio_of_ctr),
         usd_ctr: String(c.regulatory_thresholds.ctr_by_currency["USD"] ?? 10000),
       });
     }).catch((e) => setError(String(e)));
@@ -41,7 +40,6 @@ export default function RulesPage() {
       structuring_band_ratio: Number(edit.structuring_band_ratio),
       rolling_window_days: Number(edit.rolling_window_days),
       smurfing_window_hours: Number(edit.smurfing_window_hours),
-      sar_ratio: Number(edit.sar_ratio),
       ctr_thresholds: { USD: Number(edit.usd_ctr) },
     };
   }
@@ -94,18 +92,18 @@ export default function RulesPage() {
 
       {/* Regulatory thresholds */}
       <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
-        <h2 className="text-sm font-semibold text-gray-700 mb-1">Regulatory thresholds</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-1">Behavioral benchmarks</h2>
         <p className="text-xs text-gray-400 mb-4">{cfg.regulatory_thresholds.note}</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {Object.entries(cfg.regulatory_thresholds.ctr_by_currency).map(([cur, val]) => (
             <div key={cur} className="border border-gray-100 rounded-lg p-3">
-              <p className="text-xs text-gray-400">{cur} CTR</p>
+              <p className="text-xs text-gray-400">{cur} high value</p>
               <p className="text-sm font-semibold text-gray-900">{val.toLocaleString()}</p>
             </div>
           ))}
         </div>
         <p className="text-xs text-gray-500 mt-3">
-          SAR threshold = CTR × <span className="font-semibold">{cfg.regulatory_thresholds.sar_ratio_of_ctr}</span>
+          US-bank USD reporting assessment: cash above $10,000; suspicious activity at least $5,000. Officer determination required.
         </p>
       </section>
 
@@ -209,8 +207,7 @@ export default function RulesPage() {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {([
-              ["usd_ctr", "USD CTR threshold"],
-              ["sar_ratio", "SAR ratio (× CTR)"],
+              ["usd_ctr", "USD high-value benchmark"],
               ["structuring_band_ratio", "Structuring band ratio"],
               ["rolling_window_days", "Velocity window (days)"],
               ["smurfing_window_hours", "Smurfing window (hours)"],

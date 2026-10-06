@@ -28,6 +28,9 @@ ENVIRONMENT = os.getenv("FMS_ENV", "production")
 
 
 class Settings(BaseSettings):
+    regulatory_jurisdiction: str = "US"
+    institution_type: str = "bank"
+    business_timezone: str = "UTC"
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     # Optional local/self-hosted LLM: any OpenAI-compatible endpoint (e.g. Ollama
     # at http://localhost:11434/v1). When set, it replaces Groq for summaries and

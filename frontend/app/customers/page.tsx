@@ -47,7 +47,7 @@ export default function CustomersPage() {
               <tr><td colSpan={7} className="text-center py-12 text-gray-400">No accounts yet.</td></tr>
             )}
             {items.map((c) => (
-              <tr key={c.account_id} className="border-b border-gray-50 hover:bg-gray-50">
+              <tr key={`${c.account_id}:${c.currency}`} className="border-b border-gray-50 hover:bg-gray-50">
                 <td className="px-4 py-3 font-mono text-gray-800">{c.account_id}</td>
                 <td className="px-4 py-3 text-gray-700">{c.transactions}</td>
                 <td className="px-4 py-3 text-gray-700">{c.flagged}</td>

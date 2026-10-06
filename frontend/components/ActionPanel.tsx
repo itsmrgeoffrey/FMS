@@ -1,9 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, auth } from "@/lib/api";
 import type { FraudCase } from "@/types";
 
-const ACTOR_KEY = "fms.actor";
 
 const ACTIONS = [
   { key: "REVIEW", label: "Mark Under Review", style: "bg-purple-600 hover:bg-purple-700 text-white" },
@@ -12,7 +11,7 @@ const ACTIONS = [
   { key: "DISMISSED", label: "Dismiss", style: "bg-gray-200 hover:bg-gray-300 text-gray-800" },
 ];
 
-const FINAL_STATUSES = new Set(["CONFIRMED_FRAUD", "DISMISSED", "CLEAN"]);
+const FINAL_STATUSES = new Set(["CONFIRMED_FRAUD", "DISMISSED"]);
 
 export function ActionPanel({
   caseData,
@@ -22,14 +21,8 @@ export function ActionPanel({
   onUpdate: (updated: FraudCase) => void;
 }) {
   const [note, setNote] = useState("");
-  const [actor, setActor] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // Remember the officer's name across cases so the audit trail is attributed.
-  useEffect(() => {
-    setActor(localStorage.getItem(ACTOR_KEY) || "");
-  }, []);
 
   const isFinal = FINAL_STATUSES.has(caseData.status);
 
@@ -37,9 +30,7 @@ export function ActionPanel({
     setLoading(action);
     setError(null);
     try {
-      const trimmed = actor.trim();
-      if (trimmed) localStorage.setItem(ACTOR_KEY, trimmed);
-      const updated = await api.addAction(caseData.id, action, note || undefined, trimmed || undefined);
+      const updated = await api.addAction(caseData.id, action, note.trim() || undefined);
       onUpdate(updated);
       setNote("");
     } catch (e) {
@@ -49,10 +40,10 @@ export function ActionPanel({
     }
   }
 
-  if (caseData.status === "CLEAN") {
+  if (caseData.status === "CLEAN" && !caseData.ctr_required && !caseData.sar_recommended && !caseData.sanctions_hit) {
     return (
       <p className="text-sm text-green-600 font-medium">
-        No fraud signals detected — cleared by the risk engine. No action required.
+        No review is currently open for this transaction.
       </p>
     );
   }
@@ -60,7 +51,7 @@ export function ActionPanel({
   if (isFinal) {
     return (
       <p className="text-sm text-gray-500 italic">
-        This case is closed ({caseData.status.replace("_", " ")}).
+        This case is closed ({caseData.status.replace("_", " ")}). Reporting flags remain separate; closure does not record a filing.
       </p>
     );
   }
@@ -75,16 +66,10 @@ export function ActionPanel({
 
   return (
     <div className="space-y-4">
-      <input
-        value={actor}
-        onChange={(e) => setActor(e.target.value)}
-        placeholder="Your name (recorded in the audit trail)"
-        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
       <textarea
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="Optional note for this action..."
+        placeholder="Reason for disposition"
         rows={2}
         className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
       />
@@ -93,7 +78,7 @@ export function ActionPanel({
           <button
             key={a.key}
             onClick={() => handleAction(a.key)}
-            disabled={loading !== null}
+            disabled={loading !== null || (a.key !== "REVIEW" && !note.trim())}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${a.style}`}
           >
             {loading === a.key ? "Saving..." : a.label}

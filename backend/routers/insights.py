@@ -13,7 +13,7 @@ from backend.services import sanctions as S
 
 router = APIRouter(tags=["insights"])
 
-OPEN_STATUSES = ("OPEN", "UNDER_REVIEW")
+from backend.services.review import open_condition, flagged_condition
 
 # FinCEN National AML/CFT Priorities (June 30, 2021 — the operative set, which
 # the 2026 AML/CFT Program rule proposal would require institutions to incorporate
@@ -60,8 +60,8 @@ async def customers(
         select(
             FraudCase.account_id,
             func.count().label("txns"),
-            func.sum(case((FraudCase.status != "CLEAN", 1), else_=0)).label("flagged"),
-            func.sum(case((FraudCase.status.in_(OPEN_STATUSES), 1), else_=0)).label("open"),
+            func.sum(case((flagged_condition(), 1), else_=0)).label("flagged"),
+            func.sum(case((open_condition(), 1), else_=0)).label("open"),
             func.sum(case((FraudCase.sanctions_hit == True, 1), else_=0)).label("sanctions"),  # noqa: E712
             func.sum(case((FraudCase.sar_recommended == True, 1), else_=0)).label("sar"),        # noqa: E712
             func.max(FraudCase.risk_score).label("max_risk"),
@@ -69,7 +69,7 @@ async def customers(
             func.max(FraudCase.currency).label("currency"),
             func.max(FraudCase.created_at).label("last_activity"),
         )
-        .group_by(FraudCase.account_id)
+        .group_by(FraudCase.account_id, FraudCase.currency)
         .order_by(func.max(FraudCase.risk_score).desc())
         .limit(limit)
     )).all()
@@ -106,9 +106,9 @@ async def analytics(db: AsyncSession = Depends(get_db), _user: User = Depends(re
         return (await db.execute(stmt)).scalar_one()
 
     total = await count()
-    flagged = await count(FraudCase.status != "CLEAN")
-    open_cases = await count(FraudCase.status.in_(OPEN_STATUSES))
-    alerts_today = await count(FraudCase.created_at >= today_start, FraudCase.status != "CLEAN")
+    flagged = await count(flagged_condition())
+    open_cases = await count(open_condition())
+    alerts_today = await count(FraudCase.created_at >= today_start, flagged_condition())
     confirmed = await count(FraudCase.status == "CONFIRMED_FRAUD")
     dismissed = await count(FraudCase.status == "DISMISSED")
     resolved = confirmed + dismissed
@@ -116,7 +116,7 @@ async def analytics(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     # Value flagged for review, per currency (mixed-currency safe).
     q = await db.execute(
         select(FraudCase.currency, func.sum(FraudCase.amount))
-        .where(FraudCase.status != "CLEAN")
+        .where(flagged_condition())
         .group_by(FraudCase.currency)
         .order_by(func.sum(FraudCase.amount).desc())
     )
@@ -349,8 +349,9 @@ async def rules(_user: User = Depends(require_user)):
         "regulatory_thresholds": {
             "ctr_by_currency": A._CTR_THRESHOLDS,
             "sar_ratio_of_ctr": A.SAR_RATIO,
-            "note": "CTR per FinCEN/BSA (USD $10,000). SAR threshold = CTR × ratio. "
-                    "Structuring is reportable regardless of amount.",
+            "note": "These are behavioral benchmarks, not local reporting laws. "
+                    "The supported US-bank USD assessment uses cash above $10,000 for CTR review "
+                    "and suspicious activity at least $5,000 for SAR review. Unknown reporting scope requires manual assessment.",
         },
         "detection_parameters": {
             "structuring_band_ratio": A.STRUCTURING_BAND_RATIO,
@@ -359,8 +360,8 @@ async def rules(_user: User = Depends(require_user)):
         },
         "scoring_components": [
             {"name": "Behavioral deviation", "points": "0–35", "detail": "How far the amount sits from the account's own baseline (z-score bands)."},
-            {"name": "High-value transfer", "points": "5–20", "detail": "Amount at/above the CTR threshold, scaled by how far above."},
-            {"name": "Near-threshold amount", "points": "20", "detail": "Amount in the structuring band just below the reporting threshold."},
+            {"name": "High-value transfer", "points": "5–20", "detail": "Amount at/above the behavioral benchmark, scaled by how far above."},
+            {"name": "Near-threshold amount", "points": "20", "detail": "Amount in the structuring band just below the behavioral benchmark."},
             {"name": "Velocity clustering", "points": "25", "detail": "Multiple sub-threshold transfers over the rolling window that together exceed it."},
             {"name": "Outward smurfing", "points": "20", "detail": "Same-counterparty same-day accumulation crossing the threshold."},
             {"name": "Multi-source smurfing", "points": "25", "detail": "3+ distinct senders in 48h whose combined inflow exceeds the threshold."},
@@ -368,7 +369,6 @@ async def rules(_user: User = Depends(require_user)):
             {"name": "Odd hours", "points": "8", "detail": "Transaction between 01:00 and 05:00."},
             {"name": "New channel", "points": "5", "detail": "Channel not previously used by the account."},
             {"name": "Same-day velocity", "points": "5–10", "detail": "Unusually many transactions on the same day."},
-            {"name": "Batch/systematic payment", "points": "-20", "detail": "Payroll/batch reference or batch ID reduces suspicion."},
             {"name": "Established high-value pattern", "points": "-10", "detail": "Account with a consistent history of large transfers."},
         ],
         "risk_levels": [
@@ -380,9 +380,8 @@ async def rules(_user: User = Depends(require_user)):
         "sanctions": {
             "list": "OFAC SDN + OFAC Consolidated non-SDN (+ optional PEP and institution-supplied lists)",
             "match_threshold": f"{S.DEFAULT_THRESHOLD:.2f} name-similarity",
-            "note": "An SDN match overrides the behavioral score and forces a block/report case; "
-                    "Consolidated/other-list matches raise a review-required case; PEP matches "
-                    "annotate for enhanced due diligence.",
+            "note": "Name matches are candidates for identity verification, not confirmed identities. "
+                    "Missing names, unavailable lists, SDN, watch-list and PEP candidates require review.",
         },
         "national_priorities": {
             "note": "FinCEN National AML/CFT Priorities (June 30, 2021) and how this engine's "
@@ -435,21 +434,29 @@ async def rules_backtest(
     the tuning log (FFIEC expects threshold changes to be assessed and
     documented). Read-only: proposed values are applied to the engine only for
     the duration of the replay, then restored."""
-    from backend.routers.ingest import _to_normalized
+    from backend.models import TransactionProcessing
+    from backend.services.processing import from_row, deserialize
 
     cutoff = datetime.utcnow() - timedelta(days=max(1, min(body.days, 365)))
-    rows = (await db.execute(
-        select(IngestedTransaction)
-        .where(IngestedTransaction.timestamp >= cutoff)
-        .order_by(IngestedTransaction.timestamp.desc())
-        .limit(max(10, min(body.limit, 20_000)))
-    )).scalars().all()
-    rows = list(reversed(rows))  # chronological for coherent history replay
-    if not rows:
-        return {"error": "No ingested transactions in the replay window — nothing to backtest.",
+    limit = max(10, min(body.limit, 20_000))
+    transactions = {}
+    for cls in (IngestedTransaction, FraudCase):
+        rows = (await db.execute(select(cls).where(cls.timestamp >= cutoff,
+            cls.timestamp <= datetime.utcnow()).order_by(cls.timestamp.desc()).limit(limit))).scalars().all()
+        for row in rows:
+            norm = from_row(row)
+            transactions[(norm.source_table, norm.id)] = norm
+    snapshots = (await db.execute(select(TransactionProcessing).join(
+        FraudCase, FraudCase.id == TransactionProcessing.case_id).where(
+        FraudCase.timestamp >= cutoff, FraudCase.timestamp <= datetime.utcnow(),
+        TransactionProcessing.state == "COMPLETED").order_by(FraudCase.timestamp.desc()).limit(limit))).scalars().all()
+    for row in snapshots:
+        norm = deserialize(row.payload)
+        transactions[(norm.source_table, norm.id)] = norm
+    normalized = sorted(transactions.values(), key=lambda n: (n.timestamp, n.source_table, n.id))[-limit:]
+    if not normalized:
+        return {"error": "No stored transactions in the replay window.",
                 "replayed": 0}
-
-    normalized = [_to_normalized(r) for r in rows]
 
     # The evaluate() loop is fully synchronous — no awaits between apply and
     # restore — so the temporary parameter swap can't leak into live requests
@@ -459,15 +466,19 @@ async def rules_backtest(
     try:
         A.apply_rule_overrides(body.proposed or {})
         proposed = _replay(normalized)
+    except (TypeError, ValueError) as exc:
+        from fastapi import HTTPException
+        raise HTTPException(422, str(exc)) from exc
     finally:
         A.restore_rules(snap)
 
     changed = []
-    for row, norm, cur_v, new_v in zip(rows, normalized, current["verdicts"], proposed["verdicts"]):
+    for norm, cur_v, new_v in zip(normalized, current["verdicts"], proposed["verdicts"]):
         if (cur_v["is_fraudulent"], cur_v["sar_recommended"], cur_v["ctr"].required) != \
            (new_v["is_fraudulent"], new_v["sar_recommended"], new_v["ctr"].required):
             changed.append({
-                "external_id": row.external_id,
+                "external_id": norm.id,
+                "source": norm.source_table,
                 "account_id": norm.account_id,
                 "amount": norm.amount,
                 "currency": norm.currency,
@@ -484,9 +495,10 @@ async def rules_backtest(
         return {k: r[k] for k in ("flagged", "sar_recommended", "ctr_required")}
 
     return {
-        "replayed": len(rows),
+        "replayed": len(normalized),
         "window_days": body.days,
-        "note": "Replay of stored ingested transactions through the live deterministic engine. "
+        "note": "Replay of stored API and polled transactions through the deterministic engine. "
+                "Exact processing snapshots are preferred; legacy cash classification may be unknown. "
                 "Account history is approximated within the replay window; sanctions screening "
                 "and case creation are not part of a backtest.",
         "current": _summary(current),

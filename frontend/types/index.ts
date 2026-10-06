@@ -8,6 +8,7 @@ export interface CaseAction {
 }
 
 export interface FraudCase {
+  assessment?: Assessment;
   id: string;
   source_table: string;
   source_txn_id: string;
@@ -38,6 +39,7 @@ export interface FraudCase {
 }
 
 export interface FraudCaseListItem {
+  assessment?: Assessment;
   id: string;
   source_table: string;
   account_id: string;
@@ -63,6 +65,15 @@ export interface CasesPage {
   total: number;
   page: number;
   limit: number;
+}
+
+export interface Assessment {
+  version: string;
+  detection_status?: string;
+  screening_status?: string;
+  regulatory_status?: string;
+  reporting_status?: string;
+  screening_matches?: { party: string; query: string; matched_name: string; source: string; list_type: string; score: number }[];
 }
 
 export interface AuthUser {

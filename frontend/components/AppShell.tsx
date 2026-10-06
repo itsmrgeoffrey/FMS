@@ -76,6 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState(0);
   const [mobileNav, setMobileNav] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
 
   const isLogin = pathname === "/login";
   const isStandalone = isLogin || pathname === "/metrics";
@@ -103,13 +104,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">Loading…</div>;
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      await api.logout();
+    } catch {
+      setLogoutError("Sign out failed. Please retry when the service is available.");
+      return;
+    }
     auth.clear();
     router.replace("/login");
   }
 
   return (
     <div className="flex flex-col min-h-screen">
+      {logoutError && <p role="alert" className="bg-red-50 text-red-700 p-3 text-sm">{logoutError}</p>}
       {DEMO_BANNER && (
         <div className="bg-amber-50 text-amber-800 border-b border-amber-200 text-center text-[11px] font-medium tracking-wide py-1.5 px-4">
           <span className="font-bold">Demo environment</span> — synthetic data only. Do not enter real customer or transaction data.

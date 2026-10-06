@@ -2,8 +2,11 @@ import json
 import logging
 import re
 import statistics
+import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 from groq import AsyncGroq
 from backend.adapters.base import NormalizedTransaction
 from backend.config import bank_config, settings
@@ -19,7 +22,7 @@ def _get_client() -> AsyncGroq:
     doesn't require an API key — only generating a summary does."""
     global _client
     if _client is None:
-        _client = AsyncGroq(api_key=settings.groq_api_key)
+        _client = AsyncGroq(api_key=settings.groq_api_key, timeout=30, max_retries=1)
     return _client
 
 
@@ -61,10 +64,8 @@ async def _generate_summary_text(system: str, user: str) -> str:
     return (response.choices[0].message.content or "").strip()
 
 # ─── Currency-aware CTR thresholds ────────────────────────────────────────────
-# Cash-transaction reporting threshold. In the US this is the FinCEN / Bank
-# Secrecy Act CTR threshold (USD 10,000, per 31 CFR 1010.311). Other rows are
-# the local-currency equivalents for jurisdictions we've onboarded.
-# Add currencies here as new bank configs are onboarded.
+# Behavioral high-value benchmarks, NOT statutory reporting thresholds.
+# Legacy configuration uses the name ctr_thresholds for these values.
 _CTR_THRESHOLDS: dict[str, float] = {
     "USD": 10_000,
     "NGN": 15_000_000,   # ~$10k at ≈1,500 NGN/USD
@@ -76,26 +77,39 @@ _CTR_THRESHOLDS: dict[str, float] = {
     "ZAR": 190_000,      # South African rand ~$10k
 }
 
-# Suspicious Activity Report (SAR) threshold. Under the BSA a bank must file a
-# SAR for suspicious activity aggregating to USD 5,000 or more when a suspect
-# can be identified (31 CFR 1020.320) — half the CTR threshold. Structuring is
-# reportable regardless of amount, which _assess_sar() handles separately.
+# Legacy configuration compatibility only; reporting does not use this ratio.
 SAR_RATIO = 0.5
 
 ROLLING_WINDOW_DAYS = 5
 SMURFING_WINDOW_HOURS = 48
 STRUCTURING_BAND_RATIO = 0.9   # bottom of near-threshold band = 90% of high-value threshold
 
-# Reference text patterns that indicate a scheduled/systematic/batch payment.
-# If the transaction's reference OR batch_id matches, the engine reduces suspicion
-# before applying behavioural checks — bulk payroll or supplier runs should not
-# score the same as a one-off transfer to an unknown counterparty.
-_BATCH_PATTERN = re.compile(
-    r"\b(batch|payroll|pay[\s\-]?run|salary|salaries|wages|bulk|sweep|"
-    r"standing[\s\-]?order|scheduled|auto[\s\-]?debit|direct[\s\-]?debit|"
-    r"regular[\s\-]?payment|monthly[\s\-]?payment|quarterly|disbursement)\b",
-    re.IGNORECASE,
-)
+def validate_rule_overrides(rules: dict) -> dict:
+    values = dict(rules)
+    if "ctr_thresholds" in values:
+        if not isinstance(values["ctr_thresholds"], dict):
+            raise ValueError("Behavioral benchmarks must be a currency-to-amount mapping")
+        thresholds = {}
+        for currency, raw in values["ctr_thresholds"].items():
+            currency = str(currency).upper()
+            number = float(raw)
+            if not re.fullmatch(r"[A-Z]{3}", currency) or not math.isfinite(number) or number <= 0:
+                raise ValueError("Behavioral benchmarks require a currency code and positive finite amount")
+            thresholds[currency] = number
+        values["ctr_thresholds"] = thresholds
+    for key, maximum in (("rolling_window_days", 365), ("smurfing_window_hours", 8760)):
+        if key in values:
+            number = float(values[key])
+            if not math.isfinite(number) or not number.is_integer() or not 1 <= number <= maximum:
+                raise ValueError(f"{key} must be a whole number between 1 and {maximum}")
+            values[key] = int(number)
+    for key in ("structuring_band_ratio", "sar_ratio"):
+        if key in values:
+            number = float(values[key])
+            if not math.isfinite(number) or not 0 < number < 1:
+                raise ValueError(f"{key} must be between 0 and 1, exclusive")
+            values[key] = number
+    return values
 
 
 def apply_rule_overrides(rules: dict) -> None:
@@ -104,12 +118,16 @@ def apply_rule_overrides(rules: dict) -> None:
     global SAR_RATIO, STRUCTURING_BAND_RATIO, ROLLING_WINDOW_DAYS, SMURFING_WINDOW_HOURS
     if not rules:
         return
+    rules = validate_rule_overrides(rules)
     if isinstance(rules.get("ctr_thresholds"), dict):
         for cur, val in rules["ctr_thresholds"].items():
             try:
-                _CTR_THRESHOLDS[str(cur).upper()] = float(val)
+                number = float(val)
+                if not math.isfinite(number) or number <= 0:
+                    raise ValueError("Behavioral benchmarks must be positive and finite")
+                _CTR_THRESHOLDS[str(cur).upper()] = number
             except (TypeError, ValueError):
-                pass
+                raise ValueError("Behavioral benchmarks must be positive and finite")
     for key, cast in (("sar_ratio", float), ("structuring_band_ratio", float),
                       ("rolling_window_days", int), ("smurfing_window_hours", int)):
         if rules.get(key) is not None:
@@ -151,7 +169,7 @@ def restore_rules(snap: dict) -> None:
 
 
 def _ctr_threshold(currency: str) -> float:
-    return _CTR_THRESHOLDS.get((currency or "USD").upper(), 10_000)
+    return _CTR_THRESHOLDS.get((currency or "").upper(), float("inf"))
 
 
 def _sar_threshold(currency: str) -> float:
@@ -159,11 +177,7 @@ def _sar_threshold(currency: str) -> float:
 
 
 def _detect_batch(txn: NormalizedTransaction) -> str | None:
-    """Return the batch identifier if the transaction looks like a systematic payment, else None."""
-    if txn.batch_id:
-        return txn.batch_id
-    if txn.reference and _BATCH_PATTERN.search(txn.reference):
-        return txn.reference
+    """No score discount without independently verified batch provenance."""
     return None
 
 
@@ -172,7 +186,8 @@ SYSTEM_PROMPT = (
     "2–3 sentences only. No jargon, no scores, no internal system names. "
     "Focus on behaviour: what this account normally does, what this transaction does differently, "
     "and what the officer should do next. "
-    "If a CTR filing is noted, mention it as a regulatory requirement — not as evidence of fraud. "
+    "CTR and SAR flags require officer verification of filing applicability; they are not findings of fraud. "
+    "Name matches are possible matches, never confirmed identity matches. "
     "Respond with valid JSON only. No markdown."
 )
 
@@ -255,15 +270,37 @@ class FraudAnalysis:
     sar_reason: str = ""
     sanctions_hit: bool = False
     sanctions_detail: str = ""
+    screening_status: str = "NOT_SCREENED"
+    screening_matches: list | None = None
+    regulatory_review: bool = False
+    assessed_rules: dict | None = None
 
 
-def initial_case_status(is_fraudulent: bool, ctr_required: bool, sar_recommended: bool) -> str:
+def initial_case_status(is_fraudulent: bool, ctr_required: bool, sar_recommended: bool,
+                        regulatory_review: bool = False) -> str:
     """Workflow status for a newly analyzed transaction.
 
     CTR is not fraud evidence, but it is still an officer action item. Keeping
     CTR-only transactions open prevents them from being hidden as clean activity.
     """
-    return "OPEN" if is_fraudulent or ctr_required or sar_recommended else "CLEAN"
+    return "OPEN" if is_fraudulent or ctr_required or sar_recommended or regulatory_review else "CLEAN"
+
+
+def eligible_history(txn, history):
+    cutoff = txn.timestamp - timedelta(days=int(bank_config.get("monitoring", {}).get("history_days", 90)))
+    return [h for h in history if h.account_id == txn.account_id
+            and h.currency == txn.currency and cutoff <= h.timestamp <= txn.timestamp
+            and (h.source_table, h.id) != (txn.source_table, txn.id)]
+
+
+def business_day(txn):
+    return txn.business_date or txn.timestamp.replace(tzinfo=timezone.utc).astimezone(
+        ZoneInfo(settings.business_timezone)).date().isoformat()
+
+
+def supported_reporting(txn):
+    return (settings.regulatory_jurisdiction.upper() == "US"
+            and settings.institution_type.lower() == "bank" and txn.currency == "USD")
 
 
 # ─── CTR obligation assessment ────────────────────────────────────────────────
@@ -273,28 +310,34 @@ def _assess_ctr(
     history: list[NormalizedTransaction],
     threshold: float,
 ) -> CTRAssessment:
-    if txn.amount >= threshold:
+    if not supported_reporting(txn):
+        return CTRAssessment(False, "Manual reporting assessment required: only US-bank USD rules are supported; no FX conversion or foreign reporting rule is inferred.", "MANUAL_REVIEW")
+    if txn.is_cash is False:
+        return CTRAssessment(False, "Non-cash transaction: outside the cash CTR assessment.", "NONE")
+    if txn.is_cash is None:
+        return CTRAssessment(False, "Cash classification missing: verify reporting applicability manually.", "MANUAL_REVIEW")
+    threshold = Decimal("10000")
+    if txn.amount > threshold:
         return CTRAssessment(
             required=True,
-            reason=f"Single transaction of {txn.currency} {txn.amount:,.2f} exceeds CTR threshold",
+            reason=f"Cash transaction of USD {txn.amount:,.2f} exceeds $10,000. Verify exemptions and related-person aggregation before filing.",
             trigger="SINGLE_TXN",
         )
 
-    today = txn.timestamp.date() if isinstance(txn.timestamp, datetime) else None
+    today = business_day(txn)
     if today:
         same_day = [
-            h for h in history
-            if isinstance(h.timestamp, datetime)
-            and h.timestamp.date() == today
+            h for h in eligible_history(txn, history)
+            if h.is_cash is True and business_day(h) == today
             and h.direction == txn.direction
         ]
-        day_total = sum(h.amount for h in same_day) + txn.amount
-        if day_total >= threshold:
+        day_total = sum((h.amount for h in same_day), Decimal(0)) + txn.amount
+        if day_total > threshold:
             return CTRAssessment(
                 required=True,
                 reason=(
-                    f"Same-direction day aggregate: {txn.currency} {day_total:,.2f} "
-                    f"across {len(same_day) + 1} transactions"
+                    f"Same-direction cash business-day aggregate: USD {day_total:,.2f} "
+                    f"across {len(same_day) + 1} transactions. Verify exemptions and related-person aggregation before filing."
                 ),
                 trigger="SAME_DAY_AGGREGATE",
             )
@@ -303,8 +346,7 @@ def _assess_ctr(
 
 
 # ─── SAR obligation assessment ────────────────────────────────────────────────
-# Hard money-laundering signals (structuring / smurfing) are reportable on a SAR
-# regardless of dollar amount — the pattern itself is the suspicious activity.
+# Pattern signals warrant review; they are not an automatic filing determination.
 _STRUCTURING_SIGNALS = frozenset(
     {"near_threshold_amount", "near_miss_spike", "velocity_clustering",
      "outward_smurfing", "multi_source_smurfing"}
@@ -317,21 +359,12 @@ def _assess_sar(
     is_fraudulent: bool,
     ctr_threshold: float,
 ) -> tuple[bool, str]:
-    """Recommend a Suspicious Activity Report when the flagged activity meets the
-    BSA reporting bar: structuring/smurfing (any amount) or a suspicious amount
-    at/above the SAR threshold (half the CTR threshold)."""
-    if not is_fraudulent:
+    """Surface suspicious US-bank USD activity for an officer's SAR assessment."""
+    if not is_fraudulent or not supported_reporting(txn):
         return False, ""
 
     cur = txn.currency
-    structuring = _STRUCTURING_SIGNALS & risk.components.keys()
-    if structuring:
-        return True, (
-            f"Potential structuring/smurfing pattern detected "
-            f"({', '.join(sorted(structuring))}) — reportable on a SAR regardless of amount."
-        )
-
-    sar_threshold = ctr_threshold * SAR_RATIO
+    sar_threshold = Decimal("5000")
     # Largest suspicious amount in play: the transaction itself or a suspicious aggregate.
     involved = max(
         txn.amount,
@@ -341,8 +374,8 @@ def _assess_sar(
     if involved >= sar_threshold:
         return True, (
             f"Suspicious activity involving {cur} {involved:,.2f} meets the "
-            f"{cur} {sar_threshold:,.0f} SAR reporting threshold — recommend filing a "
-            f"Suspicious Activity Report."
+            f"{cur} {sar_threshold:,.0f} US-bank SAR assessment threshold. "
+            "Officer review must establish suspicion and filing applicability; this is not a filing determination."
         )
     return False, ""
 
@@ -358,6 +391,7 @@ def _rolling_window(
     days = days if days is not None else ROLLING_WINDOW_DAYS  # read live (UI-tunable)
     if not isinstance(txn.timestamp, datetime):
         return txn.amount, 1
+    history = eligible_history(txn, history)
     cutoff = txn.timestamp - timedelta(days=days)
     window = [
         h for h in history
@@ -365,7 +399,7 @@ def _rolling_window(
         and h.timestamp >= cutoff
         and h.direction == txn.direction
     ]
-    return round(sum(h.amount for h in window) + txn.amount, 2), len(window) + 1
+    return sum((h.amount for h in window), Decimal(0)) + txn.amount, len(window) + 1
 
 
 def _inbound_sources(
@@ -377,6 +411,7 @@ def _inbound_sources(
     hours = hours if hours is not None else SMURFING_WINDOW_HOURS  # read live (UI-tunable)
     if txn.direction != "INWARD" or not isinstance(txn.timestamp, datetime):
         return 0, 0.0
+    history = eligible_history(txn, history)
     cutoff = txn.timestamp - timedelta(hours=hours)
     recent = [
         h for h in history
@@ -387,7 +422,7 @@ def _inbound_sources(
     senders = {h.counterparty_account for h in recent if h.counterparty_account}
     if txn.counterparty_account:
         senders.add(txn.counterparty_account)
-    total = round(sum(h.amount for h in recent) + txn.amount, 2)
+    total = sum((h.amount for h in recent), Decimal(0)) + txn.amount
     return len(senders), total
 
 
@@ -396,6 +431,7 @@ def _inbound_sources(
 def _compute_behavioral_profile(
     history: list[NormalizedTransaction],
     threshold: float,
+    as_of: datetime | None = None,
 ) -> BehavioralProfile:
     if not history:
         return BehavioralProfile(
@@ -403,10 +439,10 @@ def _compute_behavioral_profile(
             ctr_level_count=0, large_txn_pct=0.0, known_counterparties=0,
             active_channels=[], days_active=0, recent_7d_count=0,
         )
-    amounts = [h.amount for h in history]
+    amounts = [float(h.amount) for h in history]
     avg = statistics.mean(amounts)
     std = statistics.stdev(amounts) if len(amounts) > 1 else 0.0
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = (as_of or datetime.utcnow()) - timedelta(days=7)
     return BehavioralProfile(
         transaction_count=len(history),
         avg_amount=round(avg, 2),
@@ -429,27 +465,16 @@ def _compute_risk_score(
     profile: BehavioralProfile,
     threshold: float,
 ) -> RiskScoreResult:
+    history = eligible_history(txn, history)
     score = 0
     components: dict = {}
     behavioral_verdict = "CONSISTENT"
 
     structuring_low = threshold * STRUCTURING_BAND_RATIO
-    structuring_high = threshold - 1  # one unit below threshold
+    structuring_high = threshold
 
     rolling_total, rolling_count = _rolling_window(txn, history)
     src_count_48h, inbound_total_48h = _inbound_sources(txn, history)
-
-    # ── 0. Batch / systematic payment signal (-20) ────────────────────────────
-    # Check for a batch ID or reference pattern BEFORE applying behavioural checks.
-    # A payroll run or supplier batch should not score the same as a one-off transfer
-    # to an unknown counterparty just because the amount is large.
-    batch_ref = _detect_batch(txn)
-    if batch_ref:
-        components["batch_payment"] = {
-            "score": -20,
-            "reason": f"Transaction carries a systematic/batch payment reference: '{batch_ref}'",
-        }
-        score -= 20
 
     # ── 1. Behavioral deviation: how far is this from the account's norm (0-35) ──
     if profile.transaction_count == 0:
@@ -461,7 +486,7 @@ def _compute_risk_score(
         }
     else:
         z = (
-            (txn.amount - profile.avg_amount) / profile.std_dev
+            (float(txn.amount) - profile.avg_amount) / profile.std_dev
             if profile.std_dev > 0
             else (5.0 if txn.amount > profile.avg_amount else 0.0)
         )
@@ -501,7 +526,7 @@ def _compute_risk_score(
 
     # ── 2. High-value transfer (5-20) ────────────────────────────────────────
     if txn.amount >= threshold:
-        excess = txn.amount - threshold
+        excess = float(txn.amount) - threshold
         excess_ratio = excess / threshold
         hv_pts = (
             5 if excess_ratio < 0.5
@@ -512,14 +537,14 @@ def _compute_risk_score(
         components["high_value_transfer"] = {
             "score": hv_pts,
             "reason": (
-                f"Transfer of {txn.currency} {txn.amount:,.2f} is significantly above "
-                f"the {txn.currency} {threshold:,.0f} high-value threshold"
+                f"Transfer of {txn.currency} {txn.amount:,.2f} meets or exceeds "
+                f"the {txn.currency} {threshold:,.0f} behavioral high-value benchmark"
             ),
         }
         score += hv_pts
 
     # ── 3. Near-threshold amount (20) ────────────────────────────────────────
-    if structuring_low <= txn.amount <= structuring_high:
+    if structuring_low <= txn.amount < structuring_high:
         components["near_threshold_amount"] = {
             "score": 20,
             "reason": (
@@ -541,13 +566,13 @@ def _compute_risk_score(
             "reason": (
                 f"{rolling_count} same-direction transactions over {ROLLING_WINDOW_DAYS} days "
                 f"total {txn.currency} {rolling_total:,.2f} — high transfer frequency "
-                f"with no single transaction crossing the reporting threshold"
+                f"with the current transaction below the behavioral benchmark"
             ),
         }
         score += 25
 
     # ── 5. Outward same-counterparty day accumulation / classic smurfing (20) ─
-    today = txn.timestamp.date() if isinstance(txn.timestamp, datetime) else None
+    today = business_day(txn)
     known_cps = {h.counterparty_account for h in history if h.counterparty_account}
     is_new_cp = txn.counterparty_account not in known_cps
 
@@ -556,7 +581,7 @@ def _compute_risk_score(
             h for h in history
             if h.counterparty_account == txn.counterparty_account
             and isinstance(h.timestamp, datetime)
-            and h.timestamp.date() == today
+            and business_day(h) == today
             and h.direction == "OUTWARD"
         ]
         cp_day_total = sum(h.amount for h in cp_today) + txn.amount
@@ -586,12 +611,12 @@ def _compute_risk_score(
         score += 25
 
     # ── 7. Repeated near-threshold amounts in recent history (10) ────────────
-    if not (structuring_low <= txn.amount <= structuring_high):
+    if not (structuring_low <= txn.amount < structuring_high):
         cutoff5 = txn.timestamp - timedelta(days=ROLLING_WINDOW_DAYS) if isinstance(txn.timestamp, datetime) else None
         if cutoff5:
             near_miss_in_window = [
                 h for h in history
-                if structuring_low <= h.amount <= structuring_high
+                if structuring_low <= h.amount < structuring_high
                 and isinstance(h.timestamp, datetime)
                 and h.timestamp >= cutoff5
             ]
@@ -616,7 +641,7 @@ def _compute_risk_score(
         score += cp_pts
 
     # ── 9. Odd hours (8) ──────────────────────────────────────────────────────
-    hour = txn.timestamp.hour if isinstance(txn.timestamp, datetime) else 12
+    hour = txn.timestamp.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(settings.business_timezone)).hour
     if hour in range(1, 5):
         components["odd_hours"] = {
             "score": 8,
@@ -634,7 +659,7 @@ def _compute_risk_score(
 
     # ── 11. Same-day velocity (5-10) ──────────────────────────────────────────
     if today:
-        todays = [h for h in history if isinstance(h.timestamp, datetime) and h.timestamp.date() == today]
+        todays = [h for h in history if business_day(h) == today]
         if len(todays) >= 5:
             components["high_velocity"] = {
                 "score": 10,
@@ -685,13 +710,6 @@ def _plain_reasons(
     moves = "receives" if receiving else "sends"
     reasons = []
 
-    if "batch_payment" in c:
-        batch_ref_label = c["batch_payment"]["reason"].split(": ", 1)[-1].strip("'")
-        reasons.append(
-            f"This transaction carries a systematic payment reference ({batch_ref_label}) "
-            f"— consistent with a scheduled or batch payment run."
-        )
-
     if "new_account_risk" in c:
         reasons.append(
             "This account has no previous transaction history — "
@@ -722,8 +740,8 @@ def _plain_reasons(
 
     if "high_value_transfer" in c:
         reasons.append(
-            f"This transfer of {cur} {txn.amount:,.2f} is significantly above the "
-            f"{cur} {threshold:,.0f} high-value threshold."
+            f"This transfer of {cur} {txn.amount:,.2f} meets or exceeds the "
+            f"{cur} {threshold:,.0f} behavioral high-value benchmark."
         )
 
     if "near_threshold_amount" in c:
@@ -735,21 +753,21 @@ def _plain_reasons(
     if "velocity_clustering" in c:
         verb = "received" if receiving else "made"
         reasons.append(
-            f"This account {verb} {risk.rolling_5d_count} transfers over the past 5 days "
-            f"totalling {cur} {risk.rolling_5d_total:,.2f}, with no single transfer crossing "
-            f"the {cur} {threshold:,.0f} threshold — the overall volume is unusually high."
+            f"This account {verb} {risk.rolling_5d_count} transfers over the past {ROLLING_WINDOW_DAYS} days "
+            f"totalling {cur} {risk.rolling_5d_total:,.2f}, above the "
+            f"{cur} {threshold:,.0f} behavioral benchmark, while the current transfer is below it."
         )
 
     if "outward_smurfing" in c:
         reasons.append(
             f"Multiple payments were sent to the same recipient today, "
-            f"each below {cur} {threshold:,.0f}, but adding up to more than the reporting threshold."
+            f"adding up to at least the {cur} {threshold:,.0f} behavioral benchmark."
         )
 
     if "multi_source_smurfing" in c:
         reasons.append(
             f"{risk.inbound_sources_48h} different accounts have deposited money into this account "
-            f"in the last 48 hours, totalling {cur} {risk.inbound_total_48h:,.2f} — "
+            f"in the last {SMURFING_WINDOW_HOURS} hours, totalling {cur} {risk.inbound_total_48h:,.2f} — "
             f"this pattern of multiple small deposits from different senders is known as smurfing."
         )
 
@@ -767,7 +785,7 @@ def _plain_reasons(
             reasons.append(f"{name} has never received a payment from this account before.")
 
     if "odd_hours" in c:
-        hour = txn.timestamp.hour if isinstance(txn.timestamp, datetime) else 0
+        hour = txn.timestamp.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(settings.business_timezone)).hour
         reasons.append(f"This transfer was made at {hour:02d}:00 in the early hours of the morning.")
 
     if "new_channel" in c:
@@ -797,14 +815,14 @@ def _fallback_summary(
     if profile.transaction_count > 0 and profile.avg_amount > 0:
         opener = (
             f"This account typically transfers around {cur} {profile.avg_amount:,.0f}; "
-            f"this {cur} {txn.amount:,.2f} {txn.direction.lower()} transaction stands out. "
+            f"this {cur} {txn.amount:,.2f} {txn.direction.lower()} transaction was assessed. "
         )
     else:
-        opener = f"This {cur} {txn.amount:,.2f} {txn.direction.lower()} transaction was flagged for review. "
+        opener = f"This {cur} {txn.amount:,.2f} {txn.direction.lower()} transaction was assessed with no prior account history. "
     body = " ".join(reasons[:2])
-    action = " A compliance officer should review the account and confirm or dismiss the alert."
+    action = ""
     if ctr.required:
-        action += " A CTR filing is also required (a separate regulatory obligation)."
+        action += " A compliance officer must verify CTR filing applicability separately from the fraud assessment."
     return (opener + body + action).strip()
 
 
@@ -819,8 +837,9 @@ _HARD_FRAUD_SIGNALS = frozenset(
 
 
 def evaluate(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> dict:
+    history = eligible_history(txn, history)
     threshold = _ctr_threshold(txn.currency)
-    profile = _compute_behavioral_profile(history, threshold)
+    profile = _compute_behavioral_profile(history, threshold, txn.timestamp)
     ctr = _assess_ctr(txn, history, threshold)
     risk = _compute_risk_score(txn, history, profile, threshold)
 
@@ -843,6 +862,7 @@ def evaluate(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -
 # ─── Main entry point ─────────────────────────────────────────────────────────
 
 async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> FraudAnalysis:
+    assessed_rules = snapshot_rules()
     verdict = evaluate(txn, history)
     threshold, profile, ctr, risk = verdict["threshold"], verdict["profile"], verdict["ctr"], verdict["risk"]
     is_fraudulent, confidence = verdict["is_fraudulent"], verdict["confidence"]
@@ -853,86 +873,50 @@ async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransactio
 
     fraud_type = _pick_fraud_type(risk) if is_fraudulent else None
 
-    # OFAC sanctions screening overrides the behavioural score: a listed
-    # counterparty is a block/report obligation regardless of risk level.
-    # PEP matches are different in kind — enhanced due diligence, not blocking —
-    # so they annotate the case instead of overriding it.
-    # If the list could not be loaded, the transaction was NOT screened. Never
-    # let that read as "no match": open the case for manual screening instead,
-    # because an unscreened transaction is the one state worse than a hit.
-    try:
-        sanctions_match = sanctions.screen(txn.counterparty_name)
-    except sanctions.ScreeningUnavailable as e:
-        log.error(f"Sanctions screening unavailable for txn {txn.id}: {e}")
-        is_fraudulent = True
-        confidence = "HIGH"
-        fraud_type = "screening unavailable"
-        reasons = [
-            f"MANUAL SANCTIONS SCREENING REQUIRED — this transaction was NOT screened "
-            f"against the OFAC list ({e}). Screen the counterparty manually before "
-            f"releasing, and restore the screening list."
-        ] + reasons
-        return FraudAnalysis(
-            is_fraudulent=True,
-            confidence="HIGH",
-            fraud_type="screening unavailable",
-            reasons=reasons,
-            summary=(
-                "This transaction could not be screened against the OFAC sanctions list "
-                "because the list was unavailable. It has been opened for manual review. "
-                "Screen the counterparty by hand before releasing the transaction, and "
-                "restore the screening list before processing further volume."
-            ),
-            risk_score=risk.score,
-            ctr_required=ctr.required,
-            ctr_reason=ctr.reason,
-            sar_recommended=sar_recommended,
-            sar_reason=sar_reason,
-            sanctions_hit=False,
-            sanctions_detail=f"NOT SCREENED — {e}",
-        )
-
-    sanctions_hit = sanctions_match is not None and sanctions_match.list_type == "SDN"
-    sanctions_detail = ""
-    if sanctions_match and sanctions_match.list_type == "SDN":
-        sanctions_detail = (
-            f"Counterparty '{sanctions_match.query}' matches {sanctions_match.source} "
-            f"entry '{sanctions_match.matched_name}' "
-            f"(program: {sanctions_match.program or 'N/A'}, {sanctions_match.score:.0%} match)"
-        )
-        is_fraudulent = True
-        confidence = "HIGH"
-        fraud_type = "sanctions match"
-        reasons = [
-            f"OFAC SANCTIONS MATCH — {sanctions_detail}. This is a listed party: the "
-            f"transaction must be blocked or rejected and reported to OFAC. Escalate to "
-            f"your BSA/AML officer immediately."
-        ] + reasons
-    elif sanctions_match and sanctions_match.list_type == "PEP":
-        reasons = [
-            f"POLITICALLY EXPOSED PERSON — counterparty '{sanctions_match.query}' matches "
-            f"{sanctions_match.source} entry '{sanctions_match.matched_name}' "
-            f"({sanctions_match.score:.0%} match). Not a blocking obligation, but enhanced "
-            f"due diligence is expected for PEP-linked transactions."
-        ] + reasons
-    elif sanctions_match:  # NON_SDN (OFAC Consolidated) or an institution-supplied list
-        is_fraudulent = True
-        confidence = "HIGH"
-        fraud_type = "watch-list match"
-        reasons = [
-            f"WATCH-LIST MATCH (review required) — counterparty '{sanctions_match.query}' matches "
-            f"{sanctions_match.source} entry '{sanctions_match.matched_name}' "
-            f"(program: {sanctions_match.program or 'N/A'}, {sanctions_match.score:.0%} match). "
-            f"Non-SDN lists carry program-specific restrictions rather than a blanket block "
-            f"obligation — review the listed program's requirements before processing."
-        ] + reasons
+    matches = []
+    screening_status = "NO_MATCH"
+    screening_notes = []
+    for role, name in (("account holder", txn.account_holder_name), ("counterparty", txn.counterparty_name)):
+        if not name or not name.strip():
+            screening_status = "INCOMPLETE" if screening_status == "NO_MATCH" else screening_status
+            screening_notes.append(f"Manual screening required: {role} name is missing.")
+            continue
+        try:
+            match = sanctions.screen(name)
+        except sanctions.ScreeningUnavailable:
+            screening_status = "UNAVAILABLE"
+            screening_notes.append(f"Manual screening required: the list was unavailable for the {role}.")
+            continue
+        if match:
+            matches.append({"party": role, "query": name, "matched_name": match.matched_name,
+                            "source": match.source, "list_type": match.list_type,
+                            "program": match.program, "score": match.score,
+                            "list_age_hours": sanctions.list_age_hours()})
+            screening_notes.append(
+                f"Possible {match.list_type} name match: {role} '{name}' / '{match.matched_name}' "
+                f"on {match.source} ({match.score:.0%} similarity). Verify identity and applicable "
+                "restrictions with a compliance officer; name similarity is not a confirmed identity match."
+            )
+    if matches and screening_status != "UNAVAILABLE":
+        screening_status = "POSSIBLE_MATCH"
+    health = sanctions.status()
+    if not health.get("ok"):
+        screening_status = "UNAVAILABLE"
+        screening_notes.append("Manual screening required: a usable full sanctions list is not available.")
+    elif health.get("list_age_hours") is None or health["list_age_hours"] > max(24, settings.ofac_refresh_hours * 2):
+        screening_status = "STALE"
+        screening_notes.append("Manual screening required: sanctions-list freshness cannot be confirmed.")
+    sanctions_hit = any(m["list_type"] == "SDN" for m in matches)
+    sanctions_detail = " ".join(screening_notes)
+    regulatory_review = ctr.trigger == "MANUAL_REVIEW"
+    reasons = screening_notes + ([ctr.reason] if regulatory_review else []) + reasons
 
     reasons_text = "\n".join(f"- {r}" for r in reasons)
 
     # Structured delta report — gives the AI the specific numbers so its explanation
     # references actual values, not generic phrases.
     if profile.transaction_count > 0:
-        amount_multiple = txn.amount / profile.avg_amount if profile.avg_amount > 0 else 0
+        amount_multiple = float(txn.amount) / profile.avg_amount if profile.avg_amount > 0 else 0
         cp_status = "(NEW — never seen before)" if "new_counterparty" in risk.components else "(known counterparty)"
         ch_status = "(NEW — never used before)" if "new_channel" in risk.components else ""
         t_status = "(unusual hours — 01:00–04:00)" if "odd_hours" in risk.components else ""
@@ -958,7 +942,7 @@ async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransactio
         )
 
     ctr_note = (
-        f"\nREGULATORY NOTE: {ctr.reason} — CTR filing required (separate regulatory obligation, not evidence of fraud)."
+        f"\nREGULATORY NOTE: {ctr.reason} - CTR applicability requires officer verification, separate from fraud."
         if ctr.required else ""
     )
 
@@ -1014,6 +998,10 @@ Respond with ONLY this JSON:
         sar_reason=sar_reason,
         sanctions_hit=sanctions_hit,
         sanctions_detail=sanctions_detail,
+        screening_status=screening_status,
+        screening_matches=matches,
+        regulatory_review=regulatory_review,
+        assessed_rules=assessed_rules,
     )
 
 

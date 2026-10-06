@@ -115,7 +115,7 @@ class MSSQLAdapter(BaseAdapter):
         return NormalizedTransaction(
             id=str(get("id") or ""),
             account_id=str(get("account_id") or ""),
-            amount=float(get("amount") or 0),
+            amount=get("amount") or 0,
             direction=direction,
             timestamp=ts,
             counterparty_account=str(get("counterparty_account") or "") or None,
@@ -125,6 +125,9 @@ class MSSQLAdapter(BaseAdapter):
             reference=str(get("reference") or "") or None,
             status=str(get("status") or "") or None,
             source_table=table_key,
+            account_holder_name=get("account_holder_name"),
+            is_cash=get("is_cash"),
+            business_date=str(get("business_date")) if get("business_date") else None,
             batch_id=str(get("batch_id") or "") or None,
         )
 

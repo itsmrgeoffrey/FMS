@@ -1,6 +1,7 @@
 import os
 import smtplib
 import logging
+from html import escape
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from backend.config import settings
@@ -19,7 +20,7 @@ SMTP_TIMEOUT = float(os.getenv("FMS_SMTP_TIMEOUT", "15"))
 
 def send_webhook_alert(case: dict) -> None:
     """POST flagged cases to a configured webhook (Slack-compatible or generic JSON).
-    Runs in an executor; failures are logged, never raised."""
+    Runs in an executor; failures propagate to the durable delivery queue."""
     url = (getattr(settings, "alert_webhook_url", "") or "").strip()
     if not url:
         return
@@ -38,10 +39,11 @@ def send_webhook_alert(case: dict) -> None:
             )}
         else:
             payload = {"event": "fms.case.flagged", "case": case}
-        httpx.post(url, json=payload, timeout=10)
+        httpx.post(url, json=payload, timeout=10).raise_for_status()
         log.info(f"Webhook alert sent for case {case.get('id')}")
     except Exception as e:
         log.error(f"Webhook alert failed: {e}")
+        raise
 
 
 def is_configured() -> bool:
@@ -72,6 +74,7 @@ def _send(to_email: str, subject: str, html: str) -> bool:
 
 def send_password_email(to_email: str, display_name: str, temp_password: str, by_admin: bool) -> bool:
     """Send a temporary password after a reset. Returns True if delivered."""
+    display_name, temp_password = escape(display_name), escape(temp_password)
     who = "An administrator has reset your password" if by_admin else "You requested a password reset"
     subject = "FMS — your temporary password"
     html = f"""
@@ -93,17 +96,19 @@ def send_password_email(to_email: str, display_name: str, temp_password: str, by
 
 
 def send_fraud_alert(case: dict) -> None:
+    case = {key: escape(value) if isinstance(value, str) else value for key, value in case.items()}
+    case["reasons"] = [escape(str(reason)) for reason in case.get("reasons", [])]
     if not settings.gmail_user or not settings.gmail_app_password:
         log.warning("Email not configured — skipping alert")
         return
 
-    subject = f"🚨 FRAUD ALERT [{case['confidence']}] — {case['currency']} {case['amount']:,.2f}"
+    subject = f"FMS REVIEW [{case['confidence']}] - {case['currency']} {case['amount']:,.2f}"
 
     reasons_html = "".join(f"<li>{r}</li>" for r in case.get("reasons", []))
 
     filings = []
     if case.get("ctr_required"):
-        filings.append("CTR filing required")
+        filings.append("CTR assessment requires review")
     if case.get("sar_recommended"):
         filings.append("SAR recommended")
     filing_html = (
@@ -113,18 +118,18 @@ def send_fraud_alert(case: dict) -> None:
     )
 
     if case.get("sanctions_hit"):
-        subject = f"⛔ OFAC SANCTIONS MATCH — {case['currency']} {case['amount']:,.2f} — BLOCK & REVIEW"
+        subject = f"FMS POSSIBLE SANCTIONS MATCH - {case['currency']} {case['amount']:,.2f}"
         filing_html = (
             f'<div style="background:#fef2f2;border:1px solid #fecaca;border-left:4px solid #f87171;'
             f'color:#7f1d1d;padding:14px;border-radius:8px;margin-bottom:16px;">'
-            f'<strong>OFAC SANCTIONS MATCH — transaction must be blocked or rejected and reported to OFAC.</strong>'
+            f'<strong>Possible sanctions name match. Verify identity and restrictions before disposition.</strong>'
             f'<div style="margin-top:6px;font-size:13px;color:#b91c1c;">{case.get("sanctions_detail", "")}</div></div>'
         ) + filing_html
 
     body = f"""
     <html><body style="font-family: Arial, sans-serif; color: #1a1a1a;">
       <div style="background:#fee2e2;border-left:4px solid #dc2626;padding:16px;border-radius:8px;margin-bottom:16px;">
-        <h2 style="margin:0;color:#dc2626;">Fraudulent Transaction Flagged</h2>
+        <h2 style="margin:0;color:#dc2626;">Transaction Requires Review</h2>
       </div>
 
       <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
@@ -165,3 +170,4 @@ def send_fraud_alert(case: dict) -> None:
         log.info(f"Fraud alert email sent for case {case['id']}")
     except Exception as e:
         log.error(f"Failed to send email alert: {e}")
+        raise

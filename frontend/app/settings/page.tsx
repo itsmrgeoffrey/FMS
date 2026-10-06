@@ -83,9 +83,8 @@ function MyAccountSection() {
     }
     setBusy(true);
     try {
-      await api.changePassword(current, next);
-      // Lifts the temporary-password hold in AppShell without a re-login.
-      auth.update({ must_change_password: false });
+      const session = await api.changePassword(current, next);
+      auth.set(session.token, session.user);
       setMsg({ ok: true, text: "Password changed." });
       setCurrent(""); setNext(""); setConfirm("");
     } catch (e) {

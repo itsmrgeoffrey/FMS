@@ -54,6 +54,47 @@ class FraudCase(Base):
     actions: Mapped[list["CaseAction"]] = relationship(
         "CaseAction", back_populates="case", order_by="CaseAction.created_at"
     )
+    processing_record: Mapped["TransactionProcessing | None"] = relationship(lazy="selectin", uselist=False)
+
+    @property
+    def assessment(self):
+        return self.processing_record.assessment if self.processing_record else {
+            "version": "legacy", "regulatory_status": "REASSESSMENT_REQUIRED",
+            "screening_status": "LEGACY_UNVERIFIED", "reporting_status": "NOT_ASSESSED"}
+
+
+class TransactionProcessing(Base):
+    __tablename__ = "transaction_processing"
+    __table_args__ = (UniqueConstraint("source_table", "source_txn_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source_table: Mapped[str] = mapped_column(String(20))
+    source_txn_id: Mapped[str] = mapped_column(String(128))
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    state: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("fraud_cases.id"), nullable=True, unique=True)
+    assessment: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    event: Mapped[str] = mapped_column(String(40))
+    channel: Mapped[str] = mapped_column(String(20))
+    payload: Mapped[dict] = mapped_column(JSON)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class RevokedSession(Base):
+    __tablename__ = "revoked_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
 
 
 class CaseAction(Base):

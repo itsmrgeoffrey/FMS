@@ -1,5 +1,7 @@
 # FMS: A Privacy-Preserving, Deterministic RegTech Platform for AML/CFT Compliance at Under-Resourced U.S. Financial Institutions
 
+> **Historical design paper.** This July 2026 version is retained as background, not evidence of current production readiness. The regulatory-threshold, payroll-suppression, screening, and processing claims below are superseded by [Current Scope](CURRENT_SCOPE.md). The [Roadmap](../ROADMAP.md) explicitly identifies functionality not yet built.
+
 **Tochukwu Iloani**
 *July 2026 · Version 1.1*
 

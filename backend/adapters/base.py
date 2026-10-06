@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone, date
+from decimal import Decimal
 import os
 import re
 
@@ -31,7 +32,7 @@ def validate_identifier(value: str | None, label: str = "identifier") -> str:
 class NormalizedTransaction:
     id: str
     account_id: str
-    amount: float
+    amount: Decimal
     direction: str          # INWARD / OUTWARD
     timestamp: datetime
     counterparty_account: str | None
@@ -42,6 +43,31 @@ class NormalizedTransaction:
     status: str | None
     source_table: str       # which config table key this came from
     batch_id: str | None = None   # optional — set when bank table has a batch/payment-run ID column
+    account_holder_name: str | None = None
+    is_cash: bool | None = None
+    business_date: str | None = None
+
+    def __post_init__(self):
+        self.amount = Decimal(str(self.amount))
+        if not self.amount.is_finite() or self.amount <= 0:
+            raise ValueError("amount must be a finite positive decimal")
+        self.timestamp = utc_naive(self.timestamp)
+        self.currency = self.currency.strip().upper()
+        if self.is_cash is not None:
+            if str(self.is_cash).lower() not in ("true", "false", "0", "1"):
+                raise ValueError("is_cash must be an explicit boolean")
+            self.is_cash = str(self.is_cash).lower() in ("true", "1")
+        if self.business_date:
+            self.business_date = date.fromisoformat(str(self.business_date)).isoformat()
+        if self.direction not in ("INWARD", "OUTWARD"):
+            raise ValueError("direction must be INWARD or OUTWARD")
+        if not self.id.strip() or not self.account_id.strip():
+            raise ValueError("transaction and account IDs must not be empty")
+
+
+def utc_naive(value: datetime) -> datetime:
+    """Persist UTC without a zone to match the existing database contract."""
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
 
 
 class BaseAdapter(ABC):

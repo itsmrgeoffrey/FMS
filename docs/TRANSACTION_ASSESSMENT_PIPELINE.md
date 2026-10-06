@@ -1,5 +1,7 @@
 # FMS — The Transaction Assessment Pipeline
 
+> **Historical design paper, not the current implementation.** The excerpts below predate the shared processor. Its payroll discounts, broad CTR/SAR claims, sanctions identity assertions, and duplicate-processing descriptions are superseded by [Current Scope](CURRENT_SCOPE.md), `backend/services/processing.py`, and the regression tests. Do not use these historical excerpts as current compliance guidance.
+
 *A technical whitepaper: how a single transaction travels from arrival to a compliance case, and the exact code that decides its fate at each step.*
 
 > **How to read this.** We follow **one transaction** from the moment it reaches FMS to the moment a compliance officer sees a case. At each stage we name the engine, explain what it does and why, then show the **real code** that does it — with a `file:line` reference so you can open the source and confirm every excerpt. Nothing here is paraphrased. Where a long function is trimmed for readability, the cut is marked `# …`.

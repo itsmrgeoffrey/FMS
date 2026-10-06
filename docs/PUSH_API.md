@@ -1,5 +1,17 @@
 # FMS Push API — Integrator Guide
 
+## Current Assessment Contract
+
+All channels use the shared processor. `external_id` must be unique across the current API source; configured source namespaces are deferred. Repeating an ID with the same normalized payload returns its case; a different payload returns HTTP 409. Retrying an omitted timestamp reuses its stored value. Failures persist for recovery rather than permanently consuming an ID.
+
+Send amounts as decimal strings for exact input (positive, at most 24 digits and 6 decimal places). Currency is a three-letter code. Account identifiers are nonblank strings, not limited to a particular bank's number format. Offset timestamps normalize to UTC; naive timestamps are treated as UTC.
+
+Provide `is_cash` as `true` or `false`. Missing classification requires manual reporting assessment. Optional `business_date` is an ISO date from the source banking system; otherwise the configured business timezone is used. The US-bank USD cash rule is strictly above $10,000, not every large transfer. Other regulatory scopes are manual.
+
+Responses now include `processing_status`, `review_status`, and `assessment` with separate detection, screening, regulatory, and reporting fields. A flagged transaction requires review; it is not a funds-transfer rejection or confirmed fraud. Legacy `ctr_required` and `sanctions_hit` names remain compatible but mean CTR applicability review and possible SDN name match respectively. Exports are drafts, not completed filings. See [Current Scope](CURRENT_SCOPE.md).
+
+Admins can inspect `GET /ingest/processing` and retry API records with `POST /ingest/processing/{record_id}/retry`. Polled records retry through the poller with bank history. Notifications are at-least-once; deduplicate callback `delivery_id`.
+
 Send transactions to FMS over HTTPS and get a **risk verdict back in the same response** — no database integration required. Your systems `POST` each transaction as it happens; FMS runs the full detection engine (structuring, smurfing, velocity, deviation, OFAC sanctions screening, and CTR/SAR assessment) and returns the verdict synchronously.
 
 This is the simplest way to integrate: **if you can make an authenticated HTTPS POST, you can use FMS.** No core-banking database access, no polling, no ETL.
@@ -40,13 +52,13 @@ X-API-Key: <your key>
 |---|---|:--:|---|
 | `external_id` | string (≤128) | ✔ | Your unique id for this transaction. Reusing an id is treated idempotently (see below). |
 | `account_id` | string (≤64) | ✔ | The account the transaction belongs to. |
-| `amount` | number (> 0) | ✔ | Transaction amount. |
+| `amount` | decimal string or number (> 0) | ✔ | Decimal strings preserve exact input. |
 | `direction` | string | ✔ | `INWARD` or `OUTWARD`. |
 | `timestamp` | string (ISO 8601) | — | Defaults to server time (UTC) if omitted. |
 | `counterparty_account` | string (≤64) | — | Used for counterparty pattern detection. |
 | `counterparty_name` | string (≤200) | — | Screened against the OFAC lists. |
 | `channel` | string (≤40) | — | e.g. `wire`, `ach`, `card`, `transfer`. |
-| `currency` | string (≤10) | — | Defaults to `USD`. |
+| `currency` | three-letter string | — | Defaults to `USD`. |
 | `reference` | string (≤255) | — | Free-text reference / memo. |
 | `account_holder_name` | string (≤200) | — | If provided, screened against the OFAC SDN + consolidated lists. |
 

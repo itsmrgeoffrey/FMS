@@ -82,10 +82,10 @@ export default function DashboardPage() {
         <StatTile label="Open cases" value={totals.open_cases} sub={`of ${totals.total_cases} analyzed`} />
         <StatTile label="Flagged today" value={totals.flagged_today} />
         <StatTile
-          label="Sanctions hits"
+          label="Possible sanctions matches"
           value={totals.sanctions_hits}
           tone={totals.sanctions_hits > 0 ? "alert" : undefined}
-          sub={totals.sanctions_hits > 0 ? "block or reject" : undefined}
+          sub={totals.sanctions_hits > 0 ? "verify identity" : undefined}
         />
         <StatTile
           label="SARs open"
@@ -93,7 +93,7 @@ export default function DashboardPage() {
           tone={totals.sar_soonest_deadline_days != null && totals.sar_soonest_deadline_days <= 7 ? "warn" : undefined}
           sub={totals.sar_soonest_deadline_days != null ? `soonest · ${totals.sar_soonest_deadline_days}d` : undefined}
         />
-        <StatTile label="CTR required" value={totals.ctr_required} />
+        <StatTile label="CTR review" value={totals.ctr_required} />
         <StatTile label="Confirmed fraud" value={totals.confirmed_fraud} />
       </div>
 

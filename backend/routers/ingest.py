@@ -1,235 +1,96 @@
-"""Push ingestion API.
-
-For institutions that will not (or cannot) grant database access: their system
-POSTs each transaction as it happens and receives the risk verdict
-synchronously — detect-at-the-moment monitoring with no DB integration.
-
-Auth is the machine API key (X-API-Key). Unlike the browser endpoints, this
-REFUSES to run with no key configured — an open ingestion endpoint would let
-anyone pollute the case queue.
-
-History for behavioral baselines comes from FMS's own ingested-transactions
-store, so push-mode institutions get the full engine (structuring, smurfing,
-velocity, deviation) without exposing their database.
-"""
-import asyncio
-import logging
-from datetime import datetime, timedelta
-
+"""Authenticated entry points into the shared transaction processor."""
+import hmac
+from datetime import datetime, date
+from decimal import Decimal
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from backend.adapters.base import NormalizedTransaction
-from backend.auth import require_case_action
-from backend.config import bank_config, settings
-from backend.database import get_db, SessionLocal
-from backend.models import FraudCase, IngestedTransaction, User
+from backend.auth import require_case_action, require_admin
+from backend.config import settings
+from backend.database import get_db
+from backend.models import User, TransactionProcessing, NotificationDelivery
+from sqlalchemy import select
 from backend.routers import audit
-from backend.services import analyzer, callbacks, emailer, notify, sanctions
-from backend.services.broadcaster import broadcaster
+from backend.services import processing
 
-log = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
-async def require_ingest_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
+async def require_ingest_key(request: Request, x_api_key: str | None = Header(default=None)):
     key = (settings.fms_ingest_api_key or settings.fms_api_key).strip()
     if not key:
-        raise HTTPException(status_code=503, detail="Ingestion disabled: set FMS_INGEST_API_KEY on the server first")
-    if x_api_key != key:
-        # Record rejected ingestion attempts as a security event — a burst of
-        # these is a sign someone is probing the endpoint.
-        await audit.record(
-            "api-client", "INGEST_KEY_REJECTED",
-            detail="missing X-API-Key" if not x_api_key else "invalid X-API-Key",
-            request=request,
-        )
-        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+        raise HTTPException(503, "Ingestion disabled: configure an ingestion API key")
+    if not hmac.compare_digest((x_api_key or "").encode(), key.encode()):
+        await audit.record("api-client", "INGEST_KEY_REJECTED", detail="Missing or invalid key", request=request)
+        raise HTTPException(401, "Missing or invalid X-API-Key")
 
 
 class TxnIn(BaseModel):
-    external_id: str = Field(..., max_length=128)   # caller's unique transaction id
-    account_id: str = Field(..., max_length=64)
-    amount: float = Field(..., gt=0)
+    external_id: str = Field(..., min_length=1, max_length=128)
+    account_id: str = Field(..., min_length=1, max_length=64)
+    amount: Decimal = Field(..., gt=0, max_digits=24, decimal_places=6, allow_inf_nan=False)
     direction: str = Field(..., pattern="^(INWARD|OUTWARD)$")
-    timestamp: datetime | None = None               # defaults to now (UTC)
+    timestamp: datetime | None = None
     counterparty_account: str | None = Field(None, max_length=64)
     counterparty_name: str | None = Field(None, max_length=200)
     channel: str | None = Field(None, max_length=40)
-    currency: str = Field("USD", max_length=10)
+    currency: str = Field("USD", pattern="^[A-Za-z]{3}$")
     reference: str | None = Field(None, max_length=255)
-    account_holder_name: str | None = Field(None, max_length=200)  # screened against OFAC if given
+    account_holder_name: str | None = Field(None, max_length=200)
+    is_cash: bool | None = None
+    business_date: date | None = None
+
+    @field_validator("external_id", "account_id")
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("Identifier must not be blank")
+        return value.strip()
 
 
-def _to_normalized(t: IngestedTransaction) -> NormalizedTransaction:
-    return NormalizedTransaction(
-        id=t.external_id, account_id=t.account_id, amount=t.amount,
-        direction=t.direction, timestamp=t.timestamp,
-        counterparty_account=t.counterparty_account, counterparty_name=t.counterparty_name,
-        channel=t.channel, currency=t.currency, reference=t.reference,
-        status=None, source_table="api",
-    )
+def _to_normalized(row):
+    return processing.from_row(row)
 
 
 async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
-    """Core ingestion: store, analyze, screen, case, notify. Shared by the
-    public API endpoint and the in-app simulator so both exercise identical logic."""
-    ts = body.timestamp or datetime.utcnow()
-
-    # Idempotency: same external_id -> return the existing verdict, don't re-case.
-    existing = (await db.execute(
-        select(FraudCase).where(FraudCase.source_table == "api",
-                                FraudCase.source_txn_id == body.external_id)
-    )).scalar_one_or_none()
-    if existing:
-        return _verdict(existing, duplicate=True)
-
-    row = IngestedTransaction(
-        external_id=body.external_id, account_id=body.account_id, amount=body.amount,
-        direction=body.direction, timestamp=ts,
+    txn = NormalizedTransaction(id=body.external_id, account_id=body.account_id,
+        amount=body.amount, direction=body.direction, timestamp=body.timestamp or datetime.utcnow(),
         counterparty_account=body.counterparty_account, counterparty_name=body.counterparty_name,
-        channel=body.channel, currency=body.currency.upper(), reference=body.reference,
-        account_holder_name=body.account_holder_name,
-    )
-    db.add(row)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="external_id already ingested")
-
-    history_days = int(bank_config.get("monitoring", {}).get("history_days", 90))
-    cutoff = ts - timedelta(days=history_days)
-    hist_rows = (await db.execute(
-        select(IngestedTransaction)
-        .where(IngestedTransaction.account_id == body.account_id,
-               IngestedTransaction.timestamp >= cutoff,
-               IngestedTransaction.external_id != body.external_id)
-        .order_by(IngestedTransaction.timestamp.desc())
-    )).scalars().all()
-
-    txn = _to_normalized(row)
-    result = await analyzer.analyze(txn, [_to_normalized(h) for h in hist_rows])
-
-    # Screen the ACCOUNT HOLDER too (the counterparty is screened inside analyze()).
-    # analyze() already converts a screening outage into a manual-review case, so
-    # here we only need to avoid reporting an unscreened holder as clean.
-    try:
-        holder_hit = sanctions.screen(body.account_holder_name) if body.account_holder_name else None
-    except sanctions.ScreeningUnavailable as e:
-        log.error(f"Account-holder screening unavailable for {body.external_id}: {e}")
-        holder_hit = None
-        result.is_fraudulent, result.confidence = True, "HIGH"
-        result.fraud_type = result.fraud_type or "screening unavailable"
-        result.sanctions_detail = f"NOT SCREENED — {e}"
-        result.reasons = [
-            f"MANUAL SANCTIONS SCREENING REQUIRED — account holder "
-            f"'{body.account_holder_name}' was NOT screened against the OFAC list ({e})."
-        ] + result.reasons
-    if holder_hit and holder_hit.list_type == "SDN":
-        result.sanctions_hit = True
-        detail = (f"Account holder '{body.account_holder_name}' matches {holder_hit.source} entry "
-                  f"'{holder_hit.matched_name}' (program: {holder_hit.program or 'N/A'}, {holder_hit.score:.0%} match)")
-        result.sanctions_detail = f"{result.sanctions_detail}; {detail}" if result.sanctions_detail else detail
-        result.is_fraudulent, result.confidence, result.fraud_type = True, "HIGH", "sanctions match"
-        result.reasons = [f"OFAC SANCTIONS MATCH — {detail}. Block or reject and report to OFAC."] + result.reasons
-    elif holder_hit and holder_hit.list_type == "PEP":
-        result.reasons = [
-            f"POLITICALLY EXPOSED PERSON — account holder '{body.account_holder_name}' matches "
-            f"{holder_hit.source} entry '{holder_hit.matched_name}' ({holder_hit.score:.0%} match). "
-            f"Enhanced due diligence expected."
-        ] + result.reasons
-    elif holder_hit:  # NON_SDN (OFAC Consolidated) or institution-supplied list
-        result.is_fraudulent, result.confidence, result.fraud_type = True, "HIGH", "watch-list match"
-        result.reasons = [
-            f"WATCH-LIST MATCH (review required) — account holder '{body.account_holder_name}' matches "
-            f"{holder_hit.source} entry '{holder_hit.matched_name}' (program: {holder_hit.program or 'N/A'}, "
-            f"{holder_hit.score:.0%} match). Review the listed program's restrictions before processing."
-        ] + result.reasons
-
-    case = FraudCase(
-        source_table="api", source_txn_id=body.external_id, account_id=body.account_id,
-        amount=body.amount, direction=body.direction, timestamp=ts,
-        counterparty_account=body.counterparty_account, counterparty_name=body.counterparty_name,
-        channel=body.channel, currency=body.currency.upper(), reference=body.reference,
-        risk_score=result.risk_score, ctr_required=result.ctr_required, ctr_reason=result.ctr_reason,
-        sar_recommended=result.sar_recommended, sar_reason=result.sar_reason,
-        sanctions_hit=result.sanctions_hit, sanctions_detail=result.sanctions_detail,
-        confidence=result.confidence, fraud_type=result.fraud_type,
-        reasons=result.reasons, ai_summary=result.summary,
-        status=analyzer.initial_case_status(
-            result.is_fraudulent,
-            result.ctr_required,
-            result.sar_recommended,
-        ),
-    )
-    async with SessionLocal() as wdb:
-        wdb.add(case)
-        try:
-            await wdb.commit()
-            await wdb.refresh(case)
-        except IntegrityError:
-            await wdb.rollback()
-            raise HTTPException(status_code=409, detail="external_id already ingested")
-
-    # An OFAC match is a reportable security event in its own right — record it
-    # so it shows in the Security Events view regardless of case disposition.
-    if case.sanctions_hit:
-        await audit.record(
-            "ingest", "SANCTIONS_HIT", target=case.account_id,
-            detail=(case.sanctions_detail or "OFAC match")[:490],
-        )
-
-    if result.is_fraudulent:
-        payload = {
-            "id": case.id, "account_id": case.account_id, "amount": case.amount,
-            "currency": case.currency, "direction": case.direction,
-            "confidence": case.confidence, "fraud_type": case.fraud_type,
-            "counterparty_name": case.counterparty_name, "counterparty_account": case.counterparty_account,
-            "channel": case.channel, "reasons": case.reasons, "ai_summary": case.ai_summary,
-            "ctr_required": case.ctr_required, "sar_recommended": case.sar_recommended,
-            "sanctions_hit": case.sanctions_hit, "sanctions_detail": case.sanctions_detail,
-            "created_at": str(case.created_at),
-        }
-        await broadcaster.broadcast({"event": "new_case", "case": payload})
-        # Dispatched on the dedicated notification pool so a hung mail or webhook
-        # endpoint cannot starve the executor shared with OFAC refresh and
-        # directory auth; failures are logged rather than silently discarded.
-        notify.submit(emailer.send_fraud_alert, payload, label="email:fraud_alert")
-        notify.submit(emailer.send_webhook_alert, payload, label="webhook:fraud_alert")
-        notify.submit(callbacks.post_event, "case.flagged", callbacks.case_payload(case),
-                      label="callback:case.flagged")
-
-    return _verdict(case)
-
-
-def _verdict(case: FraudCase, duplicate: bool = False) -> dict:
-    return {
-        "case_id": case.id,
-        "duplicate": duplicate,
-        "flagged": case.status != "CLEAN",
-        "risk_score": case.risk_score,
-        "confidence": case.confidence,
-        "fraud_type": case.fraud_type,
-        "sanctions_hit": case.sanctions_hit,
-        "ctr_required": case.ctr_required,
-        "sar_recommended": case.sar_recommended,
-        "reasons": case.reasons,
-    }
+        account_holder_name=body.account_holder_name, channel=body.channel, currency=body.currency,
+        reference=body.reference, status=None, source_table="api", is_cash=body.is_cash,
+        business_date=body.business_date.isoformat() if body.business_date else None)
+    return await processing.process(txn, timestamp_supplied=body.timestamp is not None)
 
 
 @router.post("/transactions", dependencies=[Depends(require_ingest_key)])
 async def ingest_transaction(body: TxnIn, db: AsyncSession = Depends(get_db)):
-    """Public push endpoint — institutions POST here with X-API-Key."""
     return await run_ingest(body, db)
 
 
 @router.post("/simulate")
 async def simulate(body: TxnIn, db: AsyncSession = Depends(get_db),
                    user: User = Depends(require_case_action)):
-    """In-app simulator — same engine, authenticated by the logged-in session
-    (no ingestion API key exposed to the browser). Works in any ingestion mode."""
     return await run_ingest(body, db)
+
+
+@router.get("/processing", dependencies=[Depends(require_admin)])
+async def processing_status(db: AsyncSession = Depends(get_db)):
+    failures = (await db.execute(select(TransactionProcessing).where(
+        TransactionProcessing.state != "COMPLETED").order_by(TransactionProcessing.updated_at).limit(100))).scalars().all()
+    deliveries = (await db.execute(select(NotificationDelivery).where(
+        NotificationDelivery.delivered == False).limit(100))).scalars().all()
+    return {"transactions": [{"id": r.id, "external_id": r.source_txn_id, "source": r.source_table,
+        "state": r.state, "attempts": r.attempts, "error": r.error} for r in failures],
+        "notifications": [{"id": r.id, "channel": r.channel, "attempts": r.attempts,
+        "error": r.error, "next_attempt_at": r.next_attempt_at} for r in deliveries]}
+
+
+@router.post("/processing/{record_id}/retry", dependencies=[Depends(require_admin)])
+async def retry_processing(record_id: str, db: AsyncSession = Depends(get_db)):
+    record = await db.get(TransactionProcessing, record_id)
+    if not record:
+        raise HTTPException(404, "Processing record not found")
+    if record.source_table != "api":
+        raise HTTPException(409, "Database transactions retry through their poller with bank history")
+    return await processing.process(processing.deserialize(record.payload))

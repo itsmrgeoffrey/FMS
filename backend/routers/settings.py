@@ -312,6 +312,12 @@ async def update_settings(
                 if getattr(body, k) is not None]
     if not sections:
         return {"saved": False, "restart_required": False}
+    if body.rules is not None:
+        from backend.services import analyzer
+        try:
+            analyzer.validate_rule_overrides(body.rules)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
     return await dual_control.submit_or_execute(
         db, request, user,
         action="SETTINGS_UPDATE",
@@ -353,7 +359,10 @@ async def _apply_settings(body: SettingsUpdate, actor: str, request: Request | N
         # reviewed" evidence.
         from backend.services import analyzer
         before = analyzer.snapshot_rules()
-        analyzer.apply_rule_overrides(existing_rules)
+        try:
+            analyzer.apply_rule_overrides(existing_rules)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
         after = analyzer.snapshot_rules()
         bank_config["rules"] = dict(existing_rules)
         if before != after:

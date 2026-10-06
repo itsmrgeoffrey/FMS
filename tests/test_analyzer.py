@@ -27,6 +27,7 @@ def txn(**kw) -> NormalizedTransaction:
         status="completed",
         source_table="outward",
         batch_id=None,
+        is_cash=True,
     )
     defaults.update(kw)
     return NormalizedTransaction(**defaults)
@@ -58,9 +59,9 @@ def test_sar_is_half_of_ctr():
     assert A._sar_threshold("USD") == 5_000
 
 
-def test_unknown_currency_defaults_to_usd_threshold():
-    assert A._ctr_threshold("XYZ") == 10_000
-    assert A._ctr_threshold(None) == 10_000
+def test_unknown_currency_does_not_inherit_usd_threshold():
+    assert A.evaluate(txn(currency="XYZ"), [])["ctr"].trigger == "MANUAL_REVIEW"
+    assert A._ctr_threshold("XYZ") == float("inf")
 
 
 # ─── CTR assessment ─────────────────────────────────────────────────────────
@@ -119,12 +120,12 @@ def test_new_account_has_no_history_risk():
     assert "new_account_risk" in risk.components
 
 
-def test_batch_reference_suppresses_score():
+def test_unverified_batch_reference_cannot_suppress_score():
     hist = history_of([1_000, 1_050, 950])
     plain = analyze_score(txn(amount=40_000), hist)
     batched = analyze_score(txn(amount=40_000, reference="Monthly PAYROLL run"), hist)
-    assert "batch_payment" in batched.components
-    assert batched.score < plain.score
+    assert "batch_payment" not in batched.components
+    assert batched.score == plain.score
 
 
 def test_multi_source_smurfing_detected():
@@ -157,13 +158,13 @@ def test_sar_not_recommended_when_not_fraudulent():
     assert not rec and reason == ""
 
 
-def test_sar_recommended_for_structuring_regardless_of_amount():
+def test_sar_recommendation_requires_officer_determination():
     hist = history_of([1_000, 1_050, 950])
     t = txn(amount=9_500)
     risk = analyze_score(t, hist)
     rec, reason = A._assess_sar(t, risk, is_fraudulent=True,
                                 ctr_threshold=A._ctr_threshold("USD"))
-    assert rec and "structuring" in reason.lower()
+    assert rec and "Officer review" in reason
 
 
 def test_sar_recommended_for_large_suspicious_amount():
@@ -178,9 +179,9 @@ def test_sar_recommended_for_large_suspicious_amount():
 # ─── Batch detection helper ─────────────────────────────────────────────────
 
 def test_detect_batch_by_reference():
-    assert A._detect_batch(txn(reference="salary disbursement")) is not None
+    assert A._detect_batch(txn(reference="salary disbursement")) is None
     assert A._detect_batch(txn(reference="gift to friend")) is None
 
 
 def test_detect_batch_by_batch_id():
-    assert A._detect_batch(txn(batch_id="BATCH-99")) == "BATCH-99"
+    assert A._detect_batch(txn(batch_id="BATCH-99")) is None

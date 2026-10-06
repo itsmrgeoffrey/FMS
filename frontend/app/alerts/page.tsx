@@ -2,11 +2,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import Pagination from "@/components/Pagination";
 import type { FraudCaseListItem } from "@/types";
 
 function money(a: number, c: string) {
   const s = c === "USD" ? "$" : c === "NGN" ? "₦" : c + " ";
-  return `${s}${a.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  return `${s}${a.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }
 function riskColor(r: number | null) {
   const v = r ?? 0;
@@ -16,14 +17,20 @@ function riskColor(r: number | null) {
 export default function AlertsPage() {
   const [items, setItems] = useState<FraudCaseListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [refresh, setRefresh] = useState(0);
+  function startLoading() { setLoading(true); setError(""); }
 
   useEffect(() => {
-    api.getCases({ limit: 100 })
-      .then((p) => setItems(p.items.filter((c) => ["OPEN", "UNDER_REVIEW"].includes(c.status))
-        .sort((a, b) => (b.risk_score ?? 0) - (a.risk_score ?? 0))))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    let cancelled = false;
+    api.getCases({ limit: 25, page, review_required: "true", sort: "risk" })
+      .then((p) => { if (!cancelled) { setItems(p.items); setTotal(p.total); } })
+      .catch(() => { if (!cancelled) { setItems([]); setError("Unable to load alerts."); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, refresh]);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -32,8 +39,9 @@ export default function AlertsPage() {
         <p className="text-sm text-gray-500 mt-1">Open cases requiring review — highest risk first.</p>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      {error && <div role="alert" className="text-sm text-red-700">{error} <button className="underline" onClick={() => { startLoading(); setRefresh((r) => r + 1); }}>Retry</button></div>}
+      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
           <thead>
             <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
               <th className="px-4 py-3 font-medium">Account</th>
@@ -46,8 +54,8 @@ export default function AlertsPage() {
             </tr>
           </thead>
           <tbody className={loading ? "opacity-50" : ""}>
-            {!loading && items.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">No open alerts — all clear.</td></tr>
+            {!loading && !error && items.length === 0 && (
+              <tr><td colSpan={7} className="text-center py-12 text-gray-400">No open alerts in this queue.</td></tr>
             )}
             {items.map((c) => (
               <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
@@ -73,6 +81,7 @@ export default function AlertsPage() {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} total={total} limit={25} loading={loading} onChange={(value) => { startLoading(); setPage(value); }} />
     </div>
   );
 }

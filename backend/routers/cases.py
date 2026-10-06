@@ -10,7 +10,8 @@ from backend.database import get_db
 from backend.models import FraudCase, CaseAction, User
 from backend.routers import audit
 from backend.schemas import FraudCaseOut, FraudCaseListItem, CaseActionCreate, CasesPage
-from backend.services import callbacks
+from backend.services import callbacks, delivery
+from backend.services.review import open_condition, flagged_condition
 
 router = APIRouter(prefix="/cases", tags=["cases"], dependencies=[Depends(require_user)])
 
@@ -27,6 +28,9 @@ STATUS_TRANSITIONS = {
 async def list_cases(
     status: str | None = Query(None),
     confidence: str | None = Query(None),
+    review_required: bool | None = Query(None),
+    result: str | None = Query(None, pattern="^(flagged|clean)$"),
+    sort: str = Query("recent", pattern="^(recent|risk)$"),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     page: int = Query(1, ge=1),
@@ -34,6 +38,10 @@ async def list_cases(
     db: AsyncSession = Depends(get_db),
 ):
     filters = []
+    if review_required:
+        filters.append(open_condition())
+    if result:
+        filters.append(flagged_condition() if result == "flagged" else ~flagged_condition())
     if status:
         filters.append(FraudCase.status == status)
     if confidence:
@@ -51,7 +59,8 @@ async def list_cases(
     q = (
         select(FraudCase)
         .where(where)
-        .order_by(FraudCase.created_at.desc())
+        .order_by(*( (FraudCase.risk_score.desc(), FraudCase.created_at.desc(), FraudCase.id)
+                    if sort == "risk" else (FraudCase.created_at.desc(), FraudCase.id) ))
         .offset((page - 1) * limit)
         .limit(limit)
     )
@@ -104,6 +113,12 @@ async def add_action(
         )
 
     new_status = STATUS_TRANSITIONS[action_key]
+    if new_status and case.status in ("CONFIRMED_FRAUD", "DISMISSED"):
+        raise HTTPException(409, "This case is closed")
+    if new_status and case.status == "CLEAN" and not (case.ctr_required or case.sar_recommended or case.sanctions_hit):
+        raise HTTPException(409, "This transaction has no outstanding review")
+    if action_key in ("DISMISSED", "CONFIRMED", "ESCALATED") and not (body.note or "").strip():
+        raise HTTPException(422, "A disposition reason is required")
     if new_status:
         case.status = new_status
         case.updated_at = datetime.utcnow()
@@ -115,6 +130,11 @@ async def add_action(
         note=body.note,
     )
     db.add(action)
+    if new_status:
+        payload = callbacks.case_payload(case)
+        payload["disposition"] = {"action": action_key, "by": user.username, "note": body.note}
+        payload["reporting_obligations_unchanged"] = True
+        delivery.enqueue(db, "case.disposition", payload)
     await db.commit()
     await db.refresh(case)
 
@@ -122,13 +142,6 @@ async def add_action(
         user.username, f"CASE_{action_key}", target=case_id,
         detail=body.note, request=request,
     )
-
-    # Notify the institution's callback of the human disposition — the moment
-    # they learn "confirmed fraud, act on this account" (or "false positive").
-    if new_status and callbacks.is_configured():
-        payload = callbacks.case_payload(case)
-        payload["disposition"] = {"action": action_key, "by": user.username, "note": body.note}
-        asyncio.get_running_loop().run_in_executor(None, callbacks.post_event, "case.disposition", payload)
 
     result2 = await db.execute(
         select(FraudCase)

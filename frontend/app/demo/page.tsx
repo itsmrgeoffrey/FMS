@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { auth } from "@/lib/api";
+import { api, auth } from "@/lib/api";
+import Link from "next/link";
 
 type Direction = "OUTWARD" | "INWARD";
 type Stage = "home" | "transfer" | "confirm" | "processing" | "success" | "error";
@@ -39,6 +40,7 @@ export default function DemoPage() {
   const [acctError, setAcctError] = useState("");
   const [recentTxns, setRecentTxns] = useState<RecentTxn[]>([]);
   const [lastReference, setLastReference] = useState("");
+  const [verdict, setVerdict] = useState<{ case_id: string; flagged: boolean; risk_score: number; ctr_required: boolean; sar_recommended: boolean; reasons: string[] } | null>(null);
 
   const [form, setForm] = useState({
     account_id: "",
@@ -51,6 +53,7 @@ export default function DemoPage() {
     sender_name: "",
     channel: "MOBILE",
     narration: "",
+    cash_kind: "NON_CASH",
   });
 
   useEffect(() => {
@@ -61,42 +64,40 @@ export default function DemoPage() {
 
   // Fetch real recent transactions
   useEffect(() => {
-    fetch("/api/cases?limit=5")
-      .then(r => r.json())
-      .then(d => setRecentTxns(d.items || []))
-      .catch(() => {});
+    api.getCases({ limit: 5 })
+      .then(d => setRecentTxns(d.items))
+      .catch(e => setError(String(e)));
   }, [stage]); // re-fetch after a new transaction is submitted
 
   function set(field: string, value: string) {
     setForm(f => ({ ...f, [field]: value }));
+    setLastReference("");
   }
 
   function handleAcctChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = e.target.value.replace(/\D/g, "").slice(0, 10);
+    const val = e.target.value;
     set("beneficiary_account", val);
-    if (acctError && val.length === 10) setAcctError("");
+    if (acctError && val.trim()) setAcctError("");
   }
 
   function handleMonitoredAccountChange(e: React.ChangeEvent<HTMLInputElement>) {
-    set("account_id", e.target.value.replace(/\D/g, "").slice(0, 10));
+    set("account_id", e.target.value);
   }
 
   function handleAcctBlur() {
     const val = form.beneficiary_account;
     if (!val) return;
-    if (val.length !== 10) {
-      setAcctError("Must be exactly 10 digits");
-      set("beneficiary_name", "");
+    if (!val.trim()) {
+      setAcctError("Enter an account identifier");
     } else {
       setAcctError("");
-      setLastReference("");
     }
   }
 
-  const monitoredAccountReady = form.account_id.length === 10;
+  const monitoredAccountReady = Boolean(form.account_id.trim());
   const counterpartyReady = direction === "OUTWARD"
-    ? form.beneficiary_account.length === 10
-    : form.sender_account.length === 10;
+    ? Boolean(form.beneficiary_account.trim())
+    : Boolean(form.sender_account.trim());
   const canContinue = Boolean(form.amount)
     && parseFloat(form.amount) > 0
     && monitoredAccountReady
@@ -107,21 +108,22 @@ export default function DemoPage() {
     setStage("processing");
     setError("");
     try {
-      const reference = `TRF/${Date.now()}`;
+      const reference = lastReference || `SIM/${crypto.randomUUID()}`;
       setLastReference(reference);
       // Push through the ingestion engine (same path a real institution's API
       // call takes) so the simulator works in API mode with no bank DB.
       const payload = {
         external_id: reference,
         direction,
-        account_id: form.account_id,
-        amount: parseFloat(form.amount),
+        account_id: form.account_id.trim(),
+        amount: form.amount,
         currency: form.currency,
         channel: form.channel,
-        reference,
-        counterparty_account: direction === "OUTWARD" ? form.beneficiary_account : form.sender_account,
+        reference: form.narration.trim() || null,
+        counterparty_account: (direction === "OUTWARD" ? form.beneficiary_account : form.sender_account).trim(),
         counterparty_name: direction === "OUTWARD" ? form.beneficiary_name : form.sender_name,
         account_holder_name: form.account_holder_name || undefined,
+        is_cash: form.cash_kind === "CASH",
       };
       const token = auth.token();
       const res = await fetch("/api/ingest/simulate", {
@@ -133,7 +135,7 @@ export default function DemoPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
-      await new Promise(r => setTimeout(r, 2000));
+      setVerdict(await res.json());
       setStage("success");
     } catch (e) {
       setError(String(e));
@@ -146,6 +148,7 @@ export default function DemoPage() {
     setForm(f => ({ ...f, amount: "", beneficiary_account: "", beneficiary_name: "", sender_account: "", sender_name: "", narration: "" }));
     setAcctError("");
     setLastReference("");
+    setVerdict(null);
   }
 
   return (
@@ -182,7 +185,7 @@ export default function DemoPage() {
               </div>
               <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-5">
                 <div className="flex items-center justify-between mb-1">
-                  <p className="text-blue-200 text-xs font-medium">Available Balance</p>
+                  <p className="text-blue-200 text-xs font-medium">Transaction Source</p>
                   <button onClick={() => setShowBalance(b => !b)}>
                     <svg className="w-4 h-4 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       {showBalance
@@ -193,7 +196,7 @@ export default function DemoPage() {
                   </button>
                 </div>
                 <p className="text-white text-2xl font-bold tracking-tight">
-                  {showBalance ? "$24,500.00" : "$••••••••"}
+                  {showBalance ? "Simulation" : "Hidden"}
                 </p>
                 <p className="text-blue-200 text-xs mt-1">Acc: {form.account_id || "not selected"}</p>
               </div>
@@ -288,16 +291,12 @@ export default function DemoPage() {
                   </label>
                   <input
                     type="text"
-                    inputMode="numeric"
-                    placeholder="10-digit account number"
+                    placeholder="Account identifier"
                     value={form.account_id}
                     onChange={handleMonitoredAccountChange}
-                    maxLength={10}
+                    maxLength={64}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono"
                   />
-                  {form.account_id.length > 0 && !monitoredAccountReady && (
-                    <p className="text-gray-400 text-xs mt-1">{form.account_id.length}/10 digits</p>
-                  )}
                 </div>
                 <div className="mt-3">
                   <label className="text-xs text-gray-400 mb-1 block">
@@ -311,7 +310,11 @@ export default function DemoPage() {
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500"
                   />
                 </div>
-                <p className="text-gray-400 text-xs mt-2">Balance: $24,500.00</p>
+                <label className="text-xs text-gray-400 mt-3 block" htmlFor="cash-kind">Transaction type</label>
+                <select id="cash-kind" value={form.cash_kind} onChange={e => set("cash_kind", e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="NON_CASH">Electronic transfer</option>
+                  <option value="CASH">Cash transaction</option>
+                </select>
               </div>
 
               <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
@@ -324,18 +327,14 @@ export default function DemoPage() {
                       <label className="text-xs text-gray-400 mb-1 block">Account Number</label>
                       <input
                         type="text"
-                        inputMode="numeric"
-                        placeholder="10-digit account number"
+                        placeholder="Counterparty identifier"
                         value={form.beneficiary_account}
                         onChange={handleAcctChange}
                         onBlur={handleAcctBlur}
-                        maxLength={10}
+                        maxLength={64}
                         className={`w-full border rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none font-mono ${acctError ? "border-red-400 focus:border-red-500" : "border-gray-200 focus:border-blue-500"}`}
                       />
                       {acctError && <p className="text-red-500 text-xs mt-1">{acctError}</p>}
-                      {form.beneficiary_account.length > 0 && !acctError && (
-                        <p className="text-gray-400 text-xs mt-1">{form.beneficiary_account.length}/10 digits</p>
-                      )}
                     </div>
                     <div>
                       <label className="text-xs text-gray-400 mb-1 block">Account Name</label>
@@ -354,11 +353,10 @@ export default function DemoPage() {
                       <label className="text-xs text-gray-400 mb-1 block">Sender Account</label>
                       <input
                         type="text"
-                        inputMode="numeric"
-                        placeholder="10-digit account number"
+                        placeholder="Sender identifier"
                         value={form.sender_account}
-                        onChange={e => set("sender_account", e.target.value.replace(/\D/g, "").slice(0, 10))}
-                        maxLength={10}
+                        onChange={e => set("sender_account", e.target.value)}
+                        maxLength={64}
                         className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono"
                       />
                     </div>
@@ -376,10 +374,9 @@ export default function DemoPage() {
                 <p className="text-gray-400 text-xs font-medium uppercase tracking-wide">Transaction Details</p>
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Channel</label>
-                  <select value={form.channel} onChange={e => set("channel", e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white">
-                    {CHANNELS.map(c => <option key={c}>{c}</option>)}
-                  </select>
+                  <input list="channels" aria-label="Channel" maxLength={40} value={form.channel} onChange={e => set("channel", e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white" />
+                  <datalist id="channels">{CHANNELS.map(c => <option key={c} value={c} />)}</datalist>
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Narration (optional)</label>
@@ -428,7 +425,7 @@ export default function DemoPage() {
                   { label: direction === "OUTWARD" ? "To" : "From", value: `${direction === "OUTWARD" ? form.beneficiary_name : form.sender_name} · ${direction === "OUTWARD" ? form.beneficiary_account : form.sender_account}` },
                   { label: "Channel", value: form.channel },
                   { label: "Narration", value: form.narration || "—" },
-                  { label: "Fee", value: "$0.52" },
+                  { label: "Type", value: form.cash_kind === "CASH" ? "Cash" : "Electronic" },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between items-start">
                     <span className="text-gray-400 text-sm">{label}</span>
@@ -438,7 +435,7 @@ export default function DemoPage() {
                 <div className="h-px bg-gray-100 my-1" />
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600 font-semibold text-sm">Total</span>
-                  <span className="text-blue-600 font-bold text-sm">{fmtAmt((parseFloat(form.amount) || 0) + 0.52)}</span>
+                  <span className="text-blue-600 font-bold text-sm">{fmtAmt(parseFloat(form.amount) || 0, form.currency)}</span>
                 </div>
               </div>
             </div>
@@ -448,7 +445,7 @@ export default function DemoPage() {
                 Cancel
               </button>
               <button onClick={submit} className="flex-1 py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm">
-                Send Now
+                Submit for Assessment
               </button>
             </div>
           </div>
@@ -468,7 +465,7 @@ export default function DemoPage() {
             </div>
             <div className="text-center">
               <p className="text-gray-900 font-bold text-xl">Processing{dots}</p>
-              <p className="text-gray-400 text-sm mt-2">Securely transferring your funds</p>
+              <p className="text-gray-400 text-sm mt-2">Assessing transaction</p>
             </div>
           </div>
         )}
@@ -483,8 +480,10 @@ export default function DemoPage() {
                 </svg>
               </div>
               <div className="text-center">
-                <p className="text-gray-900 font-bold text-2xl">Transfer Successful!</p>
-                <p className="text-gray-400 text-sm mt-1">{fmtAmt(parseFloat(form.amount) || 0)} {direction === "OUTWARD" ? "sent" : "received"}</p>
+                <p className="text-gray-900 font-bold text-2xl">{verdict?.flagged ? "Review Required" : "Assessment Complete"}</p>
+                <p className="text-gray-400 text-sm mt-1">{fmtAmt(parseFloat(form.amount) || 0, form.currency)} assessed</p>
+                <p className="text-sm mt-2">Risk {verdict?.risk_score}/100{verdict?.ctr_required ? " · CTR review" : ""}{verdict?.sar_recommended ? " · SAR review" : ""}</p>
+                {verdict && <Link href={`/cases/${verdict.case_id}`} className="text-blue-600 text-sm inline-block mt-3">View assessment</Link>}
               </div>
 
               <div className="w-full bg-gray-50 rounded-2xl p-5 space-y-3">

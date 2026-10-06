@@ -15,7 +15,7 @@ from backend.database import init_db
 from backend.logging_config import request_id_var, setup_logging
 from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest, risk
 from backend.routers import settings as settings_routes, metrics as metrics_routes
-from backend.services import poller, sanctions, metrics
+from backend.services import poller, sanctions, metrics, delivery
 
 # Configure logging before anything else emits records (env-controlled level and
 # an optional rotating file — see backend/logging_config.py).
@@ -115,12 +115,13 @@ async def lifespan(app: FastAPI):
     ofac_task = asyncio.create_task(_ofac_refresh_loop())
     retention_task = asyncio.create_task(_retention_loop())
     flush_task = asyncio.create_task(_metrics_flush_loop())
+    recovery_task = asyncio.create_task(delivery.recovery_loop())
     yield
     try:
         await metrics.flush()  # persist any buffered counts on shutdown
     except Exception:
         pass
-    for task in (poll_task, ofac_task, retention_task, flush_task):
+    for task in (poll_task, ofac_task, retention_task, flush_task, recovery_task):
         task.cancel()
         try:
             await task

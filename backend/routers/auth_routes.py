@@ -1,5 +1,6 @@
 """Signup / login / current-user / password + user management endpoints."""
 import logging
+import hashlib
 import secrets
 import time
 from collections import defaultdict
@@ -16,7 +17,7 @@ from backend.auth import (
 )
 from backend.config import ENVIRONMENT, settings
 from backend.database import get_db
-from backend.models import User
+from backend.models import User, RevokedSession
 from backend.routers import audit
 from backend.schemas import (
     ForgotPasswordRequest, LoginRequest, SignupRequest, TokenResponse, UserOut,
@@ -24,6 +25,18 @@ from backend.schemas import (
 from backend.services import dual_control, emailer, ldap_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/logout")
+async def logout(request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_user)):
+    from backend.auth import _bearer, _verify_token
+    token = _bearer(request.headers.get("authorization"))
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    if not await db.get(RevokedSession, digest):
+        payload = _verify_token(token)
+        db.add(RevokedSession(token_hash=digest, expires_at=datetime.utcfromtimestamp(payload["exp"])))
+        await db.commit()
+    return {"signed_out": True}
 log = logging.getLogger(__name__)
 
 MIN_PASSWORD_LEN = 8
@@ -222,7 +235,7 @@ async def change_password(
     user.must_change_password = False   # they now hold a secret only they know
     await db.commit()
     await audit.record(user.username, "PASSWORD_CHANGED", request=request)
-    return {"changed": True}
+    return {"changed": True, "token": create_token(user), "user": UserOut.model_validate(user)}
 
 
 # ─── Admin user management ────────────────────────────────────────────────────

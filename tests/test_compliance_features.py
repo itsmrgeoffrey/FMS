@@ -45,9 +45,10 @@ def test_evaluate_structuring_band_flagged_and_sar():
 
 
 def test_evaluate_ctr_at_threshold():
-    v = A.evaluate(txn(amount=10_000.0), [])
-    assert v["ctr"].required is True
-    assert v["ctr"].trigger == "SINGLE_TXN"
+    v = A.evaluate(txn(amount=10_000.0, is_cash=True), [])
+    assert v["ctr"].required is False
+    assert A.evaluate(txn(amount="10000.01", is_cash=True), [])["ctr"].required is True
+    assert v["ctr"].trigger == "NONE"
 
 
 # ─── snapshot / restore / override round-trip (backtest plumbing) ─────────────
@@ -108,10 +109,10 @@ def test_non_sdn_match_is_review_not_block():
                  "type": "entity", "source": "OFAC Consolidated (non-SDN)", "list_type": "NON_SDN"},
             ])
             result = await A.analyze(txn(counterparty_name="Sectoral Bank OJSC"), [])
-            assert result.is_fraudulent is True
-            assert result.fraud_type == "watch-list match"
+            assert result.is_fraudulent is False
+            assert result.screening_status != "NO_MATCH"
             assert result.sanctions_hit is False          # SDN block banner reserved for SDN
-            assert "WATCH-LIST MATCH" in result.reasons[0]
+            assert any("Possible NON_SDN" in r for r in result.reasons)
         finally:
             _reset_entries()
     asyncio.run(run())

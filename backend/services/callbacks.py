@@ -60,6 +60,7 @@ def post_event(event_type: str, payload: dict) -> None:
         if attempt < _RETRIES:
             time.sleep(_BACKOFF_SECONDS * attempt)
     log.error(f"Callback delivery FAILED after {_RETRIES} attempts: {event_type} -> {url}")
+    raise RuntimeError("Callback delivery failed; retained for retry")
 
 
 def case_payload(case) -> dict:

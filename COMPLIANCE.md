@@ -1,5 +1,7 @@
 # Regulatory alignment
 
+> See [Current Scope](docs/CURRENT_SCOPE.md) for the implemented limits and [Roadmap](ROADMAP.md) for deferred capabilities. FMS does not certify regulatory compliance.
+
 FMS is designed around US Bank Secrecy Act (BSA) reporting obligations administered by **FinCEN** (the Financial Crimes Enforcement Network, US Department of the Treasury). This document maps what the system detects to the underlying requirements.
 
 > **Important:** FMS is a decision-support tool. It **flags** activity and **prepares** filing lists. It does **not** file reports with FinCEN, and it does **not** constitute legal or compliance advice. Every determination and filing remains the responsibility of the institution and its qualified BSA/AML officer. Thresholds, forms, and deadlines change — always verify against current FinCEN guidance and your BSA officer.
@@ -7,20 +9,20 @@ FMS is designed around US Bank Secrecy Act (BSA) reporting obligations administe
 ## Currency Transaction Report (CTR)
 
 - **Rule:** A CTR is required for currency transactions exceeding **USD $10,000** in a business day, including multiple transactions that aggregate above the threshold (31 CFR 1010.311).
-- **What FMS does:** `_assess_ctr()` flags (a) any single transaction at/above the currency-aware threshold and (b) same-direction, same-day aggregates that cross it. Thresholds are defined per currency in `backend/services/analyzer.py` (USD $10,000 and local-currency equivalents).
+- **What FMS does:** `_assess_ctr()` flags US-bank USD cash strictly above $10,000, individually or in a same-direction business-day account aggregate. It excludes explicitly non-cash transactions. Unknown cash classification or unsupported scope requires manual review. Related-person aggregation, exemptions, and FX conversion are not automated.
 - **Where to see it:** the `ctr_required` flag and reason on each case, and the `/reports/ctr` export.
 
 ## Suspicious Activity Report (SAR)
 
-- **Rule:** A bank must file a SAR for suspicious activity aggregating to **USD $5,000 or more** where a suspect can be identified (31 CFR 1020.320). Certain patterns — notably **structuring** — are reportable **regardless of amount** (31 CFR 1010.314).
-- **What FMS does:** `_assess_sar()` recommends a SAR when a case is flagged and either (a) a structuring/smurfing signal is present (any amount) or (b) the suspicious amount meets the SAR threshold (half the CTR threshold).
+- **Rule:** Bank SAR requirements depend on suspicion and the applicable reporting category (31 CFR 1020.320). A transaction pattern alone is not a blanket mandatory filing rule at every amount.
+- **What FMS does:** `_assess_sar()` surfaces suspicious US-bank USD activity involving at least $5,000 for officer review. It does not derive legal thresholds from currency benchmarks or determine all mandatory/voluntary filing categories.
 - **Where to see it:** the `sar_recommended` flag and reason on each case, and the `/reports/sar` export.
 - **Note on deadlines:** SARs generally must be filed within 30 calendar days of initial detection (31 CFR 1020.320(b)(3)). FMS timestamps detection (case `created_at`) and reports the filing deadline and days remaining on every SAR report row. It tracks the clock; it does not enforce it.
 
 ## OFAC sanctions screening
 
 - **Rule:** US persons are generally prohibited from transacting with parties on OFAC's Specially Designated Nationals (SDN) list; such transactions must be **blocked or rejected** and reported to OFAC (31 CFR Part 501). This obligation is absolute — it does not depend on suspicion or amount.
-- **What FMS does:** every counterparty name is screened against the SDN list (primary names + aliases; refresh with `scripts/update_ofac.py`). A match overrides the risk score: the case is forced HIGH with an explicit block-or-reject instruction and the matched entry, program, and match score for human adjudication. Name screening produces false positives — verify before acting.
+- **What FMS does:** account-holder and counterparty names are screened in both API and polling paths. Candidate matches require identity and program-specific review without overriding the behavioral fraud finding. Missing, unusable, or stale screening information creates a manual-review state.
 - **OFAC Consolidated (non-SDN) lists:** `scripts/update_ofac.py` also fetches the Consolidated lists (e.g. Sectoral Sanctions) into `data/ofac_consolidated.json`. A match raises a **review-required** case — these lists carry program-specific restrictions, not a blanket block obligation — with the program named for the officer.
 - **Institution-supplied lists (UN/EU/UK or internal):** drop JSON files into `data/extra_lists/` using the same shape as the OFAC files (`[{"name", "program", "type", "source", "list_type"}]`; `list_type` defaults to `OTHER` = review-required, or set `SDN`/`PEP` per entry to control treatment). FMS does not bundle non-US lists.
 - **PEP screening:** if a `data/pep.json` list is provided, matches are flagged for enhanced due diligence (not blocking). FMS does not bundle PEP data; quality PEP lists are typically commercial.
@@ -35,7 +37,7 @@ FMS timestamps detection (case `created_at`) and reports the 30-day filing deadl
 
 FMS keeps these two tracks separate, because they are separate obligations:
 
-- A large, **routine** transaction (e.g. an established customer's regular six-figure wire to a known vendor) may require a **CTR** while being **not suspicious** — no SAR.
+- A large, **routine cash** transaction may require CTR review without being suspicious. A wire is not cash merely because it is large.
 - A pattern of **small** deposits structured to stay under $10,000 may warrant a **SAR** for structuring even though **no single transaction** triggers a CTR.
 
 The engine models both independently so a compliance officer sees the right obligation for the right reason.

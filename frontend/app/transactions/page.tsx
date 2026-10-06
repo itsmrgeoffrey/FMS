@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, type DateRange } from "@/lib/api";
 import DateRangePicker from "@/components/DateRangePicker";
+import Pagination from "@/components/Pagination";
 import type { FraudCaseListItem } from "@/types";
 
 function money(a: number, c: string) {
@@ -19,7 +20,7 @@ function needsReview(c: FraudCaseListItem) {
 
 function ResultBadge({ c }: { c: FraudCaseListItem }) {
   if (c.ctr_required && c.status === "CLEAN") {
-    return <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">CTR required</span>;
+    return <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">CTR review</span>;
   }
   if (c.status === "CLEAN") {
     return <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-700">clean</span>;
@@ -38,25 +39,26 @@ export default function TransactionsPage() {
   const [filter, setFilter] = useState<"all" | "flagged" | "clean">("all");
   const [range, setRange] = useState<DateRange>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [refresh, setRefresh] = useState(0);
+  function startLoading() { setLoading(true); setError(""); }
 
   useEffect(() => {
     let cancelled = false;
-    api.getCases({ limit: 100, ...range })
+    api.getCases({ limit: 25, page, ...(filter === "all" ? {} : { result: filter }), ...range })
       .then((p) => {
-        if (!cancelled) setItems(p.items);
+        if (!cancelled) { setItems(p.items); setTotal(p.total); }
       })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) { setItems([]); setError("Unable to load transactions."); } })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [range]);
-
-  const shown = items.filter((c) =>
-    filter === "all" ? true : filter === "clean" ? !needsReview(c) : needsReview(c)
-  );
+  }, [range, filter, page, refresh]);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -66,10 +68,10 @@ export default function TransactionsPage() {
           <p className="text-sm text-gray-500 mt-1">Every monitored transaction the engine has analyzed.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <DateRangePicker value={range} onChange={setRange} />
+          <DateRangePicker value={range} onChange={(value) => { startLoading(); setRange(value); setPage(1); }} />
           <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium">
             {(["all", "flagged", "clean"] as const).map((f) => (
-              <button key={f} onClick={() => setFilter(f)}
+              <button key={f} onClick={() => { if (f !== filter) { startLoading(); setFilter(f); setPage(1); } }}
                 className={`px-3 py-1 rounded-md capitalize transition-colors ${filter === f ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>
                 {f}
               </button>
@@ -78,8 +80,9 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      {error && <div role="alert" className="text-sm text-red-700">{error} <button className="underline" onClick={() => { startLoading(); setRefresh((r) => r + 1); }}>Retry</button></div>}
+      <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
           <thead>
             <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
               <th className="px-4 py-3 font-medium">Time</th>
@@ -92,12 +95,12 @@ export default function TransactionsPage() {
             </tr>
           </thead>
           <tbody className={loading ? "opacity-50" : ""}>
-            {!loading && shown.length === 0 && (
+            {!loading && !error && items.length === 0 && (
               <tr><td colSpan={7} className="text-center py-12 text-gray-400">
                 {range.date_from || range.date_to ? "No transactions in this date range." : "No transactions."}
               </td></tr>
             )}
-            {shown.map((c) => (
+            {items.map((c) => (
               <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmtDate(c.created_at)}</td>
                 <td className="px-4 py-3 font-mono text-gray-800">{c.account_id}</td>
@@ -117,6 +120,7 @@ export default function TransactionsPage() {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} total={total} limit={25} loading={loading} onChange={(value) => { startLoading(); setPage(value); }} />
     </div>
   );
 }

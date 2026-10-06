@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.database import get_db
-from backend.models import User
+from backend.models import User, RevokedSession
 
 # ─── Password hashing (PBKDF2-SHA256, stdlib) ────────────────────────────────
 
@@ -61,10 +61,29 @@ def create_token(user: User) -> str:
         "username": user.username,
         "role": user.role,
         "exp": int(time.time()) + settings.auth_token_ttl_hours * 3600,
+        "ver": _user_version(user),
+        "nonce": secrets.token_hex(16),
     }
     body = _b64u(json.dumps(payload, separators=(",", ":")).encode())
     sig = hmac.new(settings.auth_secret.encode(), body.encode(), hashlib.sha256).digest()
     return f"{body}.{_b64u(sig)}"
+
+
+def _user_version(user):
+    value = f"{user.password_hash}:{user.role}:{user.is_active}"
+    return hmac.new(settings.auth_secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+async def authenticate_token(token, db):
+    payload = _verify_token(token) if token else None
+    if not payload:
+        return None
+    if await db.get(RevokedSession, hashlib.sha256(token.encode()).hexdigest()):
+        return None
+    user = await db.get(User, payload.get("uid"))
+    if not user or not user.is_active or not hmac.compare_digest(payload.get("ver", ""), _user_version(user)):
+        return None
+    return user
 
 
 def _verify_token(token: str) -> dict | None:
@@ -95,16 +114,13 @@ async def require_user(
 ) -> User:
     """Require a valid login token; returns the current User or 401."""
     token = _bearer(authorization)
-    payload = _verify_token(token) if token else None
-    if not payload:
+    user = await authenticate_token(token, db)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    user = (await db.execute(select(User).where(User.id == payload["uid"]))).scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
     return user
 
 

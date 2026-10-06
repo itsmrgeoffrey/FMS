@@ -1,9 +1,15 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 
-class CaseActionOut(BaseModel):
+class UTCResponse(BaseModel):
+    @field_serializer("timestamp", "created_at", "updated_at", check_fields=False)
+    def serialize_time(self, value: datetime):
+        return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
+
+
+class CaseActionOut(UTCResponse):
     id: int
     case_id: str
     action: str
@@ -14,7 +20,8 @@ class CaseActionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class FraudCaseOut(BaseModel):
+class FraudCaseOut(UTCResponse):
+    assessment: dict = {}
     id: str
     source_table: str
     source_txn_id: str
@@ -46,7 +53,8 @@ class FraudCaseOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class FraudCaseListItem(BaseModel):
+class FraudCaseListItem(UTCResponse):
+    assessment: dict = {}
     id: str
     source_table: str
     account_id: str

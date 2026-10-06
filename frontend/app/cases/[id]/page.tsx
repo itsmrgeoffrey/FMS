@@ -91,6 +91,9 @@ export default function CaseDetailPage() {
           <Field label="Counterparty Account" value={caseData.counterparty_account} />
           <Field label="Counterparty Name" value={caseData.counterparty_name} />
           <Field label="Reference" value={caseData.reference} />
+          <Field label="Detection" value={caseData.assessment?.detection_status?.replaceAll("_", " ") ?? "Legacy assessment"} />
+          <Field label="Screening" value={caseData.assessment?.screening_status?.replaceAll("_", " ")} />
+          <Field label="Reporting assessment" value={caseData.assessment?.regulatory_status?.replaceAll("_", " ")} />
         </div>
       </section>
 
@@ -99,13 +102,13 @@ export default function CaseDetailPage() {
         <section className="bg-red-50 rounded-lg border border-red-200 border-l-4 border-l-red-400 p-5">
           <div className="flex items-start gap-3">
             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 border border-red-300 shrink-0 mt-0.5">
-              OFAC MATCH
+              POSSIBLE MATCH
             </span>
             <div>
-              <p className="text-sm font-semibold text-red-900 mb-1">Sanctions screening match — block or reject this transaction</p>
+              <p className="text-sm font-semibold text-red-900 mb-1">Possible sanctions match requires identity verification</p>
               <p className="text-xs text-red-700 leading-relaxed">{caseData.sanctions_detail}</p>
               <p className="text-xs text-red-500 mt-2">
-                A match against the OFAC SDN list is a blocking/reporting obligation under US sanctions law — escalate to your BSA/AML officer immediately. Verify the match before acting; name screening can produce false positives.
+                Escalate for identity and program verification. Name similarity alone does not confirm that this is the listed person or entity.
               </p>
             </div>
           </div>
@@ -117,13 +120,13 @@ export default function CaseDetailPage() {
         <section className="bg-blue-50 rounded-lg border border-blue-200 p-5">
           <div className="flex items-start gap-3">
             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-800 border border-blue-300 shrink-0 mt-0.5">
-              CTR REQUIRED
+              CTR REVIEW
             </span>
             <div>
-              <p className="text-sm font-semibold text-blue-900 mb-1">Currency Transaction Report filing obligation</p>
+              <p className="text-sm font-semibold text-blue-900 mb-1">Currency Transaction Report assessment</p>
               <p className="text-xs text-blue-700 leading-relaxed">{caseData.ctr_reason}</p>
               <p className="text-xs text-blue-500 mt-2">
-                This is a regulatory filing requirement under the Bank Secrecy Act — it does not indicate fraud on its own.
+                Verify cash classification, business-day aggregation and exemptions before filing. Legacy assessments require reassessment. This flag is separate from fraud suspicion.
               </p>
             </div>
           </div>
@@ -141,7 +144,7 @@ export default function CaseDetailPage() {
               <p className="text-sm font-semibold text-amber-900 mb-1">Suspicious Activity Report recommended</p>
               <p className="text-xs text-amber-700 leading-relaxed">{caseData.sar_reason}</p>
               <p className="text-xs text-amber-600 mt-2">
-                Under the Bank Secrecy Act, suspicious activity is reportable to FinCEN — structuring/smurfing regardless of amount, otherwise at or above the SAR threshold.
+                An officer must establish suspicion and applicable reporting requirements. This recommendation is not a filed report.
               </p>
             </div>
           </div>

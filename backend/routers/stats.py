@@ -8,6 +8,7 @@ from backend.database import get_db
 from backend.models import FraudCase, User
 from backend.schemas import StatsOut, HealthOut
 from backend.services import poller
+from backend.services.review import open_condition, flagged_condition
 
 router = APIRouter(tags=["stats"])
 
@@ -20,9 +21,9 @@ async def get_stats(db: AsyncSession = Depends(get_db), _user: User = Depends(re
         q = await db.execute(select(func.count()).select_from(FraudCase).where(and_(*filters)))
         return q.scalar_one()
 
-    flagged_today = await count([FraudCase.created_at >= today_start])
+    flagged_today = await count([FraudCase.created_at >= today_start, flagged_condition()])
     high_confidence = await count([FraudCase.confidence == "HIGH", FraudCase.status == "OPEN"])
-    pending_review = await count([FraudCase.status.in_(["OPEN", "UNDER_REVIEW"])])
+    pending_review = await count([open_condition()])
     confirmed = await count([FraudCase.status == "CONFIRMED_FRAUD"])
     dismissed_today = await count([
         FraudCase.status == "DISMISSED",
@@ -38,7 +39,6 @@ async def get_stats(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     )
 
 
-OPEN_STATUSES = ("OPEN", "UNDER_REVIEW")
 ACTIVITY_DAYS = 14
 
 
@@ -53,17 +53,17 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
         return q.scalar_one()
 
     total_cases = await count()
-    open_cases = await count(FraudCase.status.in_(OPEN_STATUSES))
-    flagged_today = await count(FraudCase.created_at >= today_start, FraudCase.status != "CLEAN")
+    open_cases = await count(open_condition())
+    flagged_today = await count(FraudCase.created_at >= today_start, flagged_condition())
     confirmed = await count(FraudCase.status == "CONFIRMED_FRAUD")
     sanctions_hits = await count(FraudCase.sanctions_hit == True)  # noqa: E712
     ctr_required = await count(FraudCase.ctr_required == True)  # noqa: E712
-    sar_open = await count(FraudCase.sar_recommended == True, FraudCase.status.in_(OPEN_STATUSES))  # noqa: E712
+    sar_open = await count(FraudCase.sar_recommended == True, open_condition())
 
     # Soonest SAR filing deadline among open SAR-recommended cases (30-day clock).
     q = await db.execute(
         select(func.min(FraudCase.created_at))
-        .where(FraudCase.sar_recommended == True, FraudCase.status.in_(OPEN_STATUSES))  # noqa: E712
+        .where(FraudCase.sar_recommended == True, open_condition())
     )
     oldest_sar = q.scalar_one_or_none()
     sar_soonest_days = None
@@ -83,8 +83,8 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     q = await db.execute(
         select(
             day,
-            func.sum(case((FraudCase.status != "CLEAN", 1), else_=0)),
-            func.sum(case((FraudCase.status == "CLEAN", 1), else_=0)),
+            func.sum(case((flagged_condition(), 1), else_=0)),
+            func.sum(case((~flagged_condition(), 1), else_=0)),
         )
         .where(FraudCase.created_at >= cutoff)
         .group_by(day)
@@ -119,7 +119,7 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     # Amount currently under investigation, per currency.
     q = await db.execute(
         select(FraudCase.currency, func.sum(FraudCase.amount))
-        .where(FraudCase.status.in_(OPEN_STATUSES))
+        .where(open_condition())
         .group_by(FraudCase.currency)
         .order_by(func.sum(FraudCase.amount).desc())
     )
@@ -128,7 +128,7 @@ async def dashboard(db: AsyncSession = Depends(get_db), _user: User = Depends(re
     # Highest-risk open cases needing attention.
     q = await db.execute(
         select(FraudCase)
-        .where(FraudCase.status.in_(OPEN_STATUSES))
+        .where(open_condition())
         .order_by(FraudCase.risk_score.desc(), FraudCase.created_at.desc())
         .limit(5)
     )

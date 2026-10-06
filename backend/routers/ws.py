@@ -1,5 +1,7 @@
+import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
-from backend.auth import _verify_token
+from backend.auth import authenticate_token
+from backend.database import SessionLocal
 from backend.config import CORS_ORIGINS
 from backend.services.broadcaster import broadcaster
 
@@ -16,15 +18,24 @@ async def websocket_endpoint(ws: WebSocket):
         return
 
     token = ws.query_params.get("token", "")
-    if not token or not _verify_token(token):
+    async def authorized():
+        async with SessionLocal() as db:
+            return await authenticate_token(token, db) is not None
+
+    if not await authorized():
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await broadcaster.connect(ws)
+    await broadcaster.connect(ws, authorized)
     try:
         while True:
             # Keep connection alive; we only push, never receive.
-            await ws.receive_text()
+            try:
+                await asyncio.wait_for(ws.receive_text(), timeout=15)
+            except asyncio.TimeoutError:
+                if not await authorized():
+                    await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
     except WebSocketDisconnect:
         pass
     finally:
