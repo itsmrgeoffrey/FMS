@@ -144,15 +144,14 @@ class MSSQLAdapter(BaseAdapter):
 
         table = self._table_name(table_key)
         id_col = self._col(table_key, "id")
-        ts_col = self._col(table_key, "timestamp")
-
-        if since_id:
+        if since_id is None:
+            return []
+        if since_id != "":
             sql = f"SELECT TOP {limit} * FROM [{table}] WHERE [{id_col}] > ? ORDER BY [{id_col}] ASC"
             rows = await self._submit(lambda: self._fetch_rows(sql, (since_id,)))
         else:
-            sql = f"SELECT TOP {limit} * FROM [{table}] ORDER BY [{ts_col}] DESC"
-            await self._submit(lambda: self._fetch_rows(sql, ()))
-            return []  # First run — just establish checkpoint
+            sql = f"SELECT TOP {limit} * FROM [{table}] ORDER BY [{id_col}] ASC"
+            rows = await self._submit(lambda: self._fetch_rows(sql, ()))
 
         return [self._row_to_txn(r, table_key) for r in rows]
 
@@ -187,8 +186,7 @@ class MSSQLAdapter(BaseAdapter):
             return None
         table = self._table_name(table_key)
         id_col = self._col(table_key, "id")
-        ts_col = self._col(table_key, "timestamp")
-        sql = f"SELECT TOP 1 [{id_col}] FROM [{table}] ORDER BY [{ts_col}] DESC"
+        sql = f"SELECT TOP 1 [{id_col}] FROM [{table}] ORDER BY [{id_col}] DESC"
 
         def fetch():
             cursor = self._conn.execute(sql)

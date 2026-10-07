@@ -4,7 +4,7 @@ FMS supports transaction monitoring and human review for one institution per dep
 
 ## Configure the Installation
 
-System, Rule Engine, and Installation are administrator-only tabs under Settings. Direct links to `/rules` and `/setup` redirect to their Settings tabs. Analysts and viewers retain My Account only; configuration and tuning-history APIs also require an administrator.
+System, Rule Engine, Approvals, and Installation are administrator-only tabs under Settings. Direct links to `/rules` and `/setup` redirect to their Settings tabs. Analysts and viewers retain My Account only; configuration and tuning-history APIs also require an administrator.
 
 1. Set the institution identity and ingestion mode in Settings > System. Use API push or the existing read-only database adapter. Payment channels are transaction data and use the same processor.
 2. Confirm jurisdiction, institution type, and business timezone in Settings > Installation, with a recorded reason. Unsupported reporting scopes remain manual; changing a behavioural benchmark does not define local reporting law.
@@ -30,10 +30,12 @@ Initial rules come from defaults and `bank_config.yaml`. After a versioned rule 
 
 Failed configuration writes leave live settings unchanged. Profile changes and rule changes share a revision: stale proposals return 409 rather than overwriting newer settings. New assessments retain their operating profile and rule snapshot; historical assessments are not rewritten by tuning.
 
-The protected configuration, approval decision and approval audit record commit together before activation. An inactive or demoted requester or approver, self-approval, a cancelled proposal, stale settings or a failed database write cannot apply the change. Approvers can inspect saved before/proposed values and the reason in Administration's approval queue. Other administrative actions and activity logging retain their existing transactional limitations.
+The protected configuration, approval decision and approval audit record commit together before activation. An inactive or demoted requester or approver, self-approval, a cancelled proposal, stale settings or a failed database write cannot apply the change. Approvers can inspect saved before/proposed values and the reason in Settings > Approvals. Other administrative actions and activity logging retain their existing transactional limitations.
 
 These controls enforce distinct administrator accounts, not independently verified human identities. Do not share accounts or let one person control both approval identities. Restrict operating-system, database, deployment and configuration-file write access: someone with host/database control can change stored rules outside application permissions. MFA remains deferred; these safeguards are not a substitute for secure deployment and identity controls.
 
 ## Intentionally Deferred
 
 Investigation workspaces, richer customer profiles, MFA, migration and backup automation, independent source registration, broader UI polish, and the full reporting lifecycle remain in [ROADMAP.md](../ROADMAP.md). The aim is a dependable, limited review tool, not an ultimate compliance platform.
+
+See [Transaction Onboarding](TRANSACTION_ONBOARDING.md) for start-point semantics, historical loading, ID conventions and second-administrator enrollment.

@@ -1,5 +1,7 @@
 # FMS Push API — Integrator Guide
 
+See [Transaction Onboarding](TRANSACTION_ONBOARDING.md) before supplying historical data or integrating multiple upstream systems. The recommended new ID convention is `system-prefix:original-transaction-id`; existing IDs must not be renamed.
+
 ## Current Assessment Contract
 
 All channels use the shared processor. `external_id` must be unique across the current API source; configured source namespaces are deferred. Repeating an ID with the same normalized payload returns its case; a different payload returns HTTP 409. Retrying an omitted timestamp reuses its stored value. Failures persist for recovery rather than permanently consuming an ID.

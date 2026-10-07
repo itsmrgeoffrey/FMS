@@ -72,6 +72,11 @@ def utc_naive(value: datetime) -> datetime:
 
 class BaseAdapter(ABC):
     @abstractmethod
+    async def get_last_id(self, table_key: str) -> str | None:
+        """Highest ID in polling order, or None for an empty source."""
+        ...
+
+    @abstractmethod
     async def connect(self) -> None: ...
 
     @abstractmethod
@@ -83,7 +88,9 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def fetch_new_transactions(
         self, table_key: str, since_id: str | None, limit: int = 100
-    ) -> list[NormalizedTransaction]: ...
+    ) -> list[NormalizedTransaction]:
+        """None is uninitialized; empty string reads an initialized empty source."""
+        ...
 
     @abstractmethod
     async def fetch_account_history(

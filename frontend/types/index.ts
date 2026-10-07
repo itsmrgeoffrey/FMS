@@ -188,6 +188,18 @@ export interface InstallationInfo {
   profile: OperatingProfile;
   revision: string;
   reporting_scope: string;
+  onboarding: {
+    mode: "poll" | "api";
+    history_days: number;
+    required_history_days: number;
+    polling_start: string;
+    cursor_requirement: string;
+    history_supply: string;
+    history_verification: string;
+    api_id_convention: string;
+    api_history: { count: number; earliest: string | null; latest: string | null };
+    checkpoints: { table_key: string; initialized: boolean; cursor: string | null; updated_at: string | null }[];
+  };
   checks: { key: string; label: string; state: "configured" | "attention" | "unverified"; detail: string; href: string }[];
   capabilities: string[];
   boundaries: string[];

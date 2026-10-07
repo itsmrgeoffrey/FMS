@@ -92,24 +92,19 @@ class MySQLAdapter(BaseAdapter):
 
         table = self._table_name(table_key)
         id_col = self._col(table_key, "id")
-        ts_col = self._col(table_key, "timestamp")
-
-        if since_id:
+        if since_id is None:
+            return []
+        if since_id != "":
             sql = f"SELECT * FROM `{table}` WHERE `{id_col}` > %s ORDER BY `{id_col}` ASC LIMIT %s"
             params = (since_id, limit)
         else:
-            # First run: grab the most recent batch to establish a checkpoint
-            sql = f"SELECT * FROM `{table}` ORDER BY `{ts_col}` DESC LIMIT %s"
+            sql = f"SELECT * FROM `{table}` ORDER BY `{id_col}` ASC LIMIT %s"
             params = (limit,)
 
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(sql, params)
                 rows = await cur.fetchall()
-
-        if not since_id:
-            # On first run return nothing — just establish checkpoint so we catch future txns
-            return []
 
         return [self._row_to_txn(dict(r), table_key) for r in rows]
 
@@ -145,8 +140,7 @@ class MySQLAdapter(BaseAdapter):
             return None
         table = self._table_name(table_key)
         id_col = self._col(table_key, "id")
-        ts_col = self._col(table_key, "timestamp")
-        sql = f"SELECT `{id_col}` FROM `{table}` ORDER BY `{ts_col}` DESC LIMIT 1"
+        sql = f"SELECT `{id_col}` FROM `{table}` ORDER BY `{id_col}` DESC LIMIT 1"
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql)

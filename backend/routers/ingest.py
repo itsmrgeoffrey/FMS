@@ -27,7 +27,8 @@ async def require_ingest_key(request: Request, x_api_key: str | None = Header(de
 
 
 class TxnIn(BaseModel):
-    external_id: str = Field(..., min_length=1, max_length=128)
+    external_id: str = Field(..., min_length=1, max_length=128,
+        description="Stable deployment-wide ID. For multiple senders use system-prefix:original-id (max 128 characters); keep it unchanged on retries. Channel does not namespace IDs.")
     account_id: str = Field(..., min_length=1, max_length=64)
     amount: Decimal = Field(..., gt=0, max_digits=24, decimal_places=6, allow_inf_nan=False)
     direction: str = Field(..., pattern="^(INWARD|OUTWARD)$")

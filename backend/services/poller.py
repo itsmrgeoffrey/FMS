@@ -42,10 +42,11 @@ def get_adapter() -> BaseAdapter:
 async def _load_checkpoint(table_key: str) -> str | None:
     async with SessionLocal() as db:
         state = await db.get(ProcessingState, table_key)
-        return state.last_processed_id if state else None
+        # An existing NULL cursor marks a source that was empty at initialization.
+        return (state.last_processed_id or "") if state else None
 
 
-async def _save_checkpoint(table_key: str, last_id: str) -> None:
+async def _save_checkpoint(table_key: str, last_id: str | None) -> None:
     async with SessionLocal() as db:
         state = await db.get(ProcessingState, table_key)
         if state:
@@ -80,9 +81,9 @@ async def _process_table(adapter: BaseAdapter, table_key: str, history_days: int
     # On first run: just set the checkpoint to the latest existing ID, start monitoring from now
     if since_id is None:
         latest = await adapter.get_last_id(table_key)
-        if latest:
-            await _save_checkpoint(table_key, latest)
-            log.info(f"[{table_key}] First run — checkpoint set to {latest}. Monitoring from next poll.")
+        await _save_checkpoint(table_key, latest)
+        log.info("[%s] Initial cursor: %s. Existing rows are baseline only; monitoring from next poll.",
+                 table_key, latest if latest is not None else "empty source")
         return
 
     table_keys = list(bank_config.get("tables", {}).keys())

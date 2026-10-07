@@ -85,15 +85,20 @@ class OracleAdapter(BaseAdapter):
         )
 
     async def fetch_new_transactions(self, table_key, since_id, limit=100):
-        if table_key not in self._tables or not since_id:
+        if table_key not in self._tables or since_id is None:
             return []
         table = validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
         id_col = self._col(table_key, "id")
-        sql = (f'SELECT * FROM "{table}" WHERE "{id_col}" > :1 '
-               f'ORDER BY "{id_col}" ASC FETCH FIRST :2 ROWS ONLY')
+        if since_id != "":
+            sql = (f'SELECT * FROM "{table}" WHERE "{id_col}" > :1 '
+                   f'ORDER BY "{id_col}" ASC FETCH FIRST :2 ROWS ONLY')
+            params = [since_id, limit]
+        else:
+            sql = f'SELECT * FROM "{table}" ORDER BY "{id_col}" ASC FETCH FIRST :1 ROWS ONLY'
+            params = [limit]
         async with self._pool.acquire() as conn:
             cur = conn.cursor()
-            await cur.execute(sql, [since_id, limit])
+            await cur.execute(sql, params)
             rows = self._rows_to_dicts(cur, await cur.fetchall())
         return [self._row_to_txn(r, table_key) for r in rows]
 
@@ -118,8 +123,8 @@ class OracleAdapter(BaseAdapter):
         if table_key not in self._tables:
             return None
         table = validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
-        id_col, ts_col = self._col(table_key, "id"), self._col(table_key, "timestamp")
-        sql = f'SELECT "{id_col}" FROM "{table}" ORDER BY "{ts_col}" DESC FETCH FIRST 1 ROWS ONLY'
+        id_col = self._col(table_key, "id")
+        sql = f'SELECT "{id_col}" FROM "{table}" ORDER BY "{id_col}" DESC FETCH FIRST 1 ROWS ONLY'
         async with self._pool.acquire() as conn:
             cur = conn.cursor()
             await cur.execute(sql)

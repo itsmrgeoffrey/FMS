@@ -52,12 +52,12 @@ Outbound in both modes: optional **signed webhooks** — every delivery is HMAC-
 
 | Capability | Admin | Analyst | Viewer |
 |---|---|---|---|
-| View dashboards, cases, reports, rules, risk assessment | ✅ | ✅ | ✅ |
+| View dashboards, cases, reports, risk assessment | ✅ | ✅ | ✅ |
 | Act on cases (confirm / dismiss / escalate / note) | ✅ | ✅ | — |
 | Run 314(a) scans, access audit trail & security events | ✅ | — | — |
-| Tune rules, run backtests, edit settings, manage users, edit/finalize risk assessments | ✅ | — | — |
+| View and tune rules, run backtests, edit settings, manage users, edit/finalize risk assessments | ✅ | — | — |
 
-Enforcement is in `backend/auth.py` dependencies (`require_user`, `require_admin`) applied per-router and per-endpoint. **Dual control (maker-checker):** when two or more active admins exist, sensitive admin changes (user creation, role changes, enable/disable, password resets of others, settings changes) queue as `pending_approvals` and execute only when a *different* admin approves; the requester can never approve their own change. With fewer than two admins, changes apply immediately and the UI says so.
+Enforcement is in `backend/auth.py` dependencies (`require_user`, `require_admin`) applied per-router and per-endpoint. **Dual control (maker-checker):** when two or more active admins exist, sensitive admin changes (user creation, role changes, enable/disable, password resets of others, settings changes) queue as `pending_approvals` and execute only when a *different* admin approves; the requester can never approve their own change. Rule and operating-profile changes always require a different active admin, including single-admin installations. Other administrative bootstrap actions retain immediate application with fewer than two admins. The queue and pending count are in Settings > Approvals.
 
 Bootstrap: the first account becomes admin (production requires `FMS_SETUP_TOKEN`); public signup is disabled after that (`FMS_ALLOW_SIGNUP=false`). Optional LDAP / Active Directory sign-in federates authentication with group→role mapping (local accounts are tried first, then the directory).
 

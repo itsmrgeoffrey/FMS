@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Plus, Play, Save, LockKeyhole, Pencil, X } from "lucide-react";
 import { api, auth } from "@/lib/api";
 import { LoadError, RefreshButton } from "@/components/ReviewUI";
@@ -11,7 +12,7 @@ const COVERAGE_STYLE: Record<string, string> = {
   screening: "bg-blue-50 text-blue-700",
 };
 
-export default function RuleEngineSettings() {
+export default function RuleEngineSettings({ onSubmitted }: { onSubmitted: () => void }) {
   const [cfg, setCfg] = useState<RulesConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<Record<string, string>>({});
@@ -106,6 +107,7 @@ export default function RuleEngineSettings() {
       });
       setNotice(result.pending ? "Submitted for second-person approval. Live rules are unchanged." : result.saved ? "Rules applied. Change reason and server replay recorded." : "No effective rule change.");
       setRationale("");
+      onSubmitted();
       setEditing(false);
       setBacktest(null);
       reload();
@@ -133,7 +135,7 @@ export default function RuleEngineSettings() {
         </button>}
       </div>
       {error && <LoadError message={error} retry={reload} />}
-      {notice && <p role="status" className="border-l-4 border-blue-500 bg-blue-50 p-3 text-sm text-blue-800">{notice}</p>}
+      {notice && <p role="status" className="border-l-4 border-blue-500 bg-blue-50 p-3 text-sm text-blue-800">{notice} <Link href="/settings?tab=approvals" className="font-medium underline">View approvals</Link></p>}
 
       {/* Regulatory thresholds */}
       <section className="border-t border-gray-200 pt-5">

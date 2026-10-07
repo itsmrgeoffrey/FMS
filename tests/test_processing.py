@@ -494,6 +494,84 @@ def test_poller_retries_without_advancing_and_uses_shared_processor(store, monke
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("baseline", [None, "0", "100"])
+def test_poller_initializes_once_and_preserves_first_arrivals(store, monkeypatch, baseline):
+    from backend.services import poller
+    monkeypatch.setattr(poller, "SessionLocal", store)
+    class Adapter:
+        initial_reads = 0
+        cursors = []
+        async def get_last_id(self, table):
+            self.initial_reads += 1
+            return baseline
+        async def fetch_new_transactions(self, table, since):
+            self.cursors.append(since)
+            return [txn(id="101", source_table="bank_table")]
+        async def fetch_account_history(self, account, tables, days):
+            return []
+    async def run():
+        adapter = Adapter()
+        await poller._process_table(adapter, "bank_table", 90)
+        assert adapter.initial_reads == 1 and not adapter.cursors
+        assert await poller._load_checkpoint("bank_table") == (baseline if baseline is not None else "")
+        async with store() as db:
+            assert (await db.execute(select(func.count()).select_from(TransactionProcessing))).scalar_one() == 0
+        await poller._process_table(adapter, "bank_table", 90)
+        assert adapter.initial_reads == 1
+        assert adapter.cursors == [baseline if baseline is not None else ""]
+        assert await poller._load_checkpoint("bank_table") == "101"
+        async with store() as db:
+            record = (await db.execute(select(TransactionProcessing))).scalar_one()
+            assert record.state == "COMPLETED" and record.source_txn_id == "101"
+    asyncio.run(run())
+
+
+def test_onboarding_reports_saved_cursors_without_contacting_source(store, monkeypatch):
+    from backend.services import installation, poller
+    from backend.models import ProcessingState
+    monkeypatch.setitem(installation.bank_config, "monitoring", {"mode": "poll", "history_days": 90})
+    monkeypatch.setitem(installation.bank_config, "tables", {"existing": {}, "empty": {}, "new": {}})
+    def no_source_access():
+        raise AssertionError("Installation status must not connect to the source")
+    monkeypatch.setattr(poller, "get_adapter", no_source_access)
+    async def run():
+        async with store() as db:
+            db.add_all([ProcessingState(table_key="existing", last_processed_id="45"),
+                        ProcessingState(table_key="empty", last_processed_id=None)])
+            await db.commit()
+            result = (await installation.inspect(db))["onboarding"]
+            assert result["mode"] == "poll" and result["history_days"] == 90
+            rows = {r["table_key"]: r for r in result["checkpoints"]}
+            assert rows["existing"]["initialized"] and rows["existing"]["cursor"] == "45"
+            assert rows["empty"]["initialized"] and rows["empty"]["cursor"] is None
+            assert not rows["new"]["initialized"]
+            assert result["api_history"] == {"count": 0, "earliest": None, "latest": None}
+            assert "not assessed" in result["polling_start"]
+            assert "oldest first" in result["history_supply"]
+            assert "do not prove completeness" in result["history_verification"]
+    asyncio.run(run())
+
+
+def test_prefixed_api_ids_separate_senders_and_preserve_retry_contract(store):
+    from backend.routers.ingest import TxnIn
+    async def run():
+        first = await P.process(txn(id="core:12345"))
+        second = await P.process(txn(id="wallet:12345", account_id="OTHER"))
+        assert first["case_id"] != second["case_id"]
+        retry = await P.process(txn(id="core:12345"))
+        assert retry["duplicate"] and retry["case_id"] == first["case_id"]
+        with pytest.raises(HTTPException) as error:
+            await P.process(txn(id="core:12345", amount="7000"))
+        assert error.value.status_code == 409
+        legacy = await P.process(txn(id="legacy-id"))
+        assert legacy["case_id"]
+        async with store() as db:
+            assert (await db.execute(select(func.count()).select_from(TransactionProcessing))).scalar_one() == 3
+    asyncio.run(run())
+    with pytest.raises(ValueError):
+        TxnIn(external_id="core:" + "a" * 124, account_id="A", amount="1", direction="INWARD")
+
+
 def test_history_excludes_foreign_currency_future_and_other_accounts():
     t = txn(amount="100")
     history = [replace(t, id="ngn", currency="NGN", amount="15000"),

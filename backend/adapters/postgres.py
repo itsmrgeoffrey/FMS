@@ -85,11 +85,16 @@ class PostgresAdapter(BaseAdapter):
             return []
         table = validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
         id_col = self._col(table_key, "id")
-        if not since_id:
+        if since_id is None:
             return []
-        sql = f'SELECT * FROM "{table}" WHERE "{id_col}" > $1 ORDER BY "{id_col}" ASC LIMIT $2'
+        if since_id != "":
+            sql = f'SELECT * FROM "{table}" WHERE "{id_col}" > $1 ORDER BY "{id_col}" ASC LIMIT $2'
+            params = (since_id, limit)
+        else:
+            sql = f'SELECT * FROM "{table}" ORDER BY "{id_col}" ASC LIMIT $1'
+            params = (limit,)
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(sql, since_id, limit)
+            rows = await conn.fetch(sql, *params)
         return [self._row_to_txn(r, table_key) for r in rows]
 
     async def fetch_account_history(self, account_id, table_keys, history_days=90):
@@ -111,8 +116,8 @@ class PostgresAdapter(BaseAdapter):
         if table_key not in self._tables:
             return None
         table = validate_identifier(self._tables[table_key]["table_name"], f"{table_key} table")
-        id_col, ts_col = self._col(table_key, "id"), self._col(table_key, "timestamp")
-        sql = f'SELECT "{id_col}" FROM "{table}" ORDER BY "{ts_col}" DESC LIMIT 1'
+        id_col = self._col(table_key, "id")
+        sql = f'SELECT "{id_col}" FROM "{table}" ORDER BY "{id_col}" DESC LIMIT 1'
         async with self._pool.acquire() as conn:
             val = await conn.fetchval(sql)
         return str(val) if val is not None else None

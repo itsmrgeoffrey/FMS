@@ -1,5 +1,8 @@
 "use client";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { X } from "lucide-react";
+import { LoadError, RefreshButton } from "@/components/ReviewUI";
 import { useRouter, useSearchParams } from "next/navigation";
 import RuleEngineSettings from "@/components/RuleEngineSettings";
 import InstallationSettings from "@/components/InstallationSettings";
@@ -124,9 +127,8 @@ function MyAccountSection() {
   );
 }
 
-function UsersSection() {
+function UsersSection({ onChanged }: { onChanged: () => void }) {
   const [users, setUsers] = useState<AuthUser[]>([]);
-  const [approvals, setApprovals] = useState<ApprovalsPage | null>(null);
   const [temp, setTemp] = useState<{ username: string; email: string | null; emailed: boolean; temp_password: string | null } | null>(null);
   const [pendingMsg, setPendingMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,11 +139,11 @@ function UsersSection() {
   const [creating, setCreating] = useState(false);
   const me = auth.user();
 
-  function load() {
+  const load = useCallback(() => {
     api.listUsers().then(setUsers).catch((e) => setError(String(e)));
-    api.listApprovals().then(setApprovals).catch(() => {});
-  }
-  useEffect(load, []);
+    onChanged();
+  }, [onChanged]);
+  useEffect(load, [load]);
 
   /** Dual control: sensitive actions may come back queued instead of applied. */
   function handled<T extends object>(res: T | { pending: true; message: string }): res is { pending: true; message: string } {
@@ -205,9 +207,6 @@ function UsersSection() {
 
   return (
     <>
-    {approvals && (
-      <ApprovalsSection approvals={approvals} onChanged={load} onTemp={setTemp} />
-    )}
     <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5">
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-gray-700">Users</h2>
@@ -254,27 +253,12 @@ function UsersSection() {
 
       {pendingMsg && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
-          ⏳ {pendingMsg}
+          {pendingMsg} <Link href="/settings?tab=approvals" className="font-medium underline">View approvals</Link>
         </div>
       )}
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-      {temp && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
-          {temp.emailed ? (
-            <>A temporary password was <span className="font-semibold">emailed to {temp.email}</span> for {temp.username}. They should change it after signing in.</>
-          ) : (
-            <>
-              Temporary password for <span className="font-semibold">{temp.username}</span>:{" "}
-              <code className="font-mono bg-white px-2 py-0.5 rounded border border-amber-200">{temp.temp_password}</code>
-              <span className="block text-xs text-amber-600 mt-1">
-                {temp.email ? "Email isn't configured, so " : "No email on file, so "}
-                shown once — copy it now and share it securely.
-              </span>
-            </>
-          )}
-        </div>
-      )}
+      {temp && <TemporaryPasswordNotice temp={temp} onDismiss={() => setTemp(null)} />}
 
       <table className="w-full text-sm">
         <thead>
@@ -335,6 +319,28 @@ function UsersSection() {
   );
 }
 
+type TemporaryPassword = { username: string; email: string | null; emailed: boolean; temp_password: string | null };
+
+function TemporaryPasswordNotice({ temp, onDismiss }: { temp: TemporaryPassword; onDismiss: () => void }) {
+  return (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+          <button type="button" onClick={onDismiss} title="Dismiss credential notice" aria-label="Dismiss credential notice" className="float-right ml-3 p-1"><X size={16} /></button>
+          {temp.emailed ? (
+            <>A temporary password was <span className="font-semibold">emailed to {temp.email}</span> for {temp.username}. They should change it after signing in.</>
+          ) : (
+            <>
+              Temporary password for <span className="font-semibold">{temp.username}</span>:{" "}
+              <code className="font-mono bg-white px-2 py-0.5 rounded border border-amber-200">{temp.temp_password}</code>
+              <span className="block text-xs text-amber-600 mt-1">
+                {temp.email ? "Email isn't configured, so " : "No email on file, so "}
+                shown once — copy it now and share it securely.
+              </span>
+            </>
+          )}
+        </div>
+  );
+}
+
 function ApprovalsSection({
   approvals, onChanged, onTemp,
 }: {
@@ -355,11 +361,12 @@ function ApprovalsSection({
         const res = await api.approveChange(a.id);
         // A user-create/password-reset approval may surface a one-time temp password.
         const r = res.result as { username?: string; email?: string | null; emailed?: boolean; temp_password?: string | null };
-        if (r && r.temp_password) {
-          onTemp({ username: r.username ?? "", email: r.email ?? null, emailed: !!r.emailed, temp_password: r.temp_password });
+        if (r && (r.temp_password || r.emailed)) {
+          onTemp({ username: r.username ?? "", email: r.email ?? null, emailed: !!r.emailed, temp_password: r.temp_password ?? null });
         }
       } else if (action === "reject") {
-        const note = window.prompt("Reason for rejecting (optional):") ?? undefined;
+        const note = window.prompt("Reason for rejecting (optional):");
+        if (note === null) return;
         await api.rejectChange(a.id, note);
       } else {
         await api.cancelChange(a.id);
@@ -373,10 +380,10 @@ function ApprovalsSection({
   }
 
   return (
-    <section className="bg-white rounded-xl border border-gray-200/80 shadow-sm p-5 mb-6">
+    <section className="space-y-4">
       <div className="mb-3 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-sm font-semibold text-gray-700">Pending Approvals (dual control)</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Pending approvals</h2>
           <p className="text-xs text-gray-400 mt-0.5">
             Sensitive changes need a second admin&apos;s sign-off — the requester can never approve their own change.
           </p>
@@ -394,6 +401,10 @@ function ApprovalsSection({
 
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
+      {approvals.active_admins < 2 && <div role="status" className="border-l-4 border-amber-500 bg-amber-50 p-3 text-sm text-amber-900">
+        Only {approvals.active_admins} active administrator account(s). Rule and profile changes remain pending until a different active administrator approves.
+        <Link href="/settings?tab=users" className="ml-1 font-medium underline">Manage administrators</Link>
+      </div>}
       {approvals.pending.length === 0 ? (
         <p className="text-sm text-gray-400">No changes waiting for approval.</p>
       ) : (
@@ -424,7 +435,7 @@ function ApprovalsSection({
                   {mine ? (
                     <button
                       onClick={() => decide(a, "cancel")}
-                      disabled={busy === a.id}
+                      disabled={busy !== null}
                       className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                     >
                       Cancel my request
@@ -433,14 +444,14 @@ function ApprovalsSection({
                     <>
                       <button
                         onClick={() => decide(a, "approve")}
-                        disabled={busy === a.id || !!a.configuration_proposal?.stale}
+                        disabled={busy !== null || !!a.configuration_proposal?.stale}
                         className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
                       >
                         Approve
                       </button>
                       <button
                         onClick={() => decide(a, "reject")}
-                        disabled={busy === a.id}
+                        disabled={busy !== null}
                         className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-50"
                       >
                         Reject
@@ -561,11 +572,12 @@ function RolesPermissions() {
   );
 }
 
-type AdminTab = "system" | "rules" | "installation" | "account" | "users" | "roles" | "directory" | "integrations";
+type AdminTab = "system" | "rules" | "approvals" | "installation" | "account" | "users" | "roles" | "directory" | "integrations";
 
 const TABS: { key: AdminTab; label: string; adminOnly?: boolean }[] = [
   { key: "system", label: "System", adminOnly: true },
   { key: "rules", label: "Rule Engine", adminOnly: true },
+  { key: "approvals", label: "Approvals", adminOnly: true },
   { key: "installation", label: "Installation", adminOnly: true },
   { key: "account", label: "My Account" },
   { key: "users", label: "Users", adminOnly: true },
@@ -602,6 +614,36 @@ function SettingsContent() {
   const [activity, setActivity] = useState<AuditEntry[]>([]);
   const pristine = useRef<string>("");
   const isAdmin = auth.user()?.role === "admin";
+  const [approvals, setApprovals] = useState<ApprovalsPage | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const [approvalRevision, setApprovalRevision] = useState(0);
+  const [approvalTemp, setApprovalTemp] = useState<TemporaryPassword | null>(null);
+  const refreshApprovals = useCallback(() => { setApprovalRevision(value => value + 1); }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let active = true;
+    let inFlight = false;
+    async function refresh() {
+      if (inFlight) return;
+      inFlight = true;
+      setApprovalLoading(true);
+      try {
+        const result = await api.listApprovals();
+        if (active) { setApprovals(result); setApprovalError(null); }
+      } catch (e) {
+        if (active) setApprovalError(String(e));
+      } finally {
+        inFlight = false;
+        if (active) setApprovalLoading(false);
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 30000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [isAdmin, approvalRevision, tab]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -725,6 +767,9 @@ function SettingsContent() {
             }`}
           >
             {t.label}
+            {t.key === "approvals" && <span aria-label={approvalError ? "Pending count unavailable" : approvals ? `${approvals.pending.length} pending` : "Loading pending count"} className="ml-1.5 inline-flex h-5 min-w-6 items-center justify-center rounded bg-blue-50 px-1 text-xs tabular-nums text-blue-700">
+              {approvalError ? "?" : approvals ? approvals.pending.length : "..."}
+            </span>}
           </button>
         ))}
       </div>
@@ -741,9 +786,16 @@ function SettingsContent() {
         </div>
       )}
 
+      {approvalTemp && <TemporaryPasswordNotice temp={approvalTemp} onDismiss={() => setApprovalTemp(null)} />}
       <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} tabIndex={0} className="space-y-6">
-      {tab === "rules" && isAdmin && <RuleEngineSettings />}
-      {tab === "installation" && isAdmin && <InstallationSettings />}
+      {tab === "rules" && isAdmin && <RuleEngineSettings onSubmitted={refreshApprovals} />}
+      {tab === "installation" && isAdmin && <InstallationSettings onSubmitted={refreshApprovals} />}
+      {tab === "approvals" && isAdmin && <div className="space-y-4">
+        <div className="flex justify-end"><RefreshButton loading={approvalLoading} onClick={refreshApprovals} /></div>
+        {approvalError && <LoadError message={approvalError} retry={refreshApprovals} />}
+        {!approvals && !approvalError && <p role="status" className="text-sm text-gray-500">Loading approvals...</p>}
+        {approvals && !approvalError && <ApprovalsSection approvals={approvals} onChanged={refreshApprovals} onTemp={setApprovalTemp} />}
+      </div>}
       {tab === "system" && isAdmin && (<>
       {/* Bank database */}
       <Section
@@ -1117,7 +1169,7 @@ function SettingsContent() {
 
       {tab === "account" && <MyAccountSection />}
 
-      {tab === "users" && isAdmin && <UsersSection />}
+      {tab === "users" && isAdmin && <UsersSection onChanged={refreshApprovals} />}
 
       {tab === "directory" && (() => {
         const dir = data.directory ?? {};
