@@ -300,6 +300,14 @@ export type MaybePending<T> = (T & { pending?: false }) | {
 };
 
 export interface Approval {
+  configuration_proposal?: {
+    kind: "rules" | "operating_profile";
+    before: Record<string, unknown>;
+    proposed: Record<string, unknown>;
+    rationale: string;
+    stale: boolean;
+    initial_configuration_allowed: boolean;
+  };
   id: string;
   action: string;
   target: string | null;

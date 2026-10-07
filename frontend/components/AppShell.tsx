@@ -37,17 +37,13 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
     { href: "/customers", label: "Customers", d: ICONS.customers },
     { href: "/cases", label: "Cases", d: ICONS.cases },
   ] },
-  { section: "Detection", items: [
-    { href: "/rules", label: "Rule Engine", d: ICONS.rules },
-  ] },
   { section: "Compliance", items: [
     { href: "/reports", label: "Reports (SAR/STR)", d: ICONS.reports },
     { href: "/risk", label: "Risk Assessment", d: ICONS.risk },
     { href: "/audit", label: "Audit Trail", d: ICONS.audit, requires: "admin" },
   ] },
-  { section: "System", requires: "admin", items: [
-    { href: "/setup", label: "Installation", d: ICONS.admin },
-    { href: "/settings", label: "Administration", d: ICONS.admin },
+  { section: "Administration", requires: "admin", items: [
+    { href: "/settings", label: "Settings", d: ICONS.admin },
   ] },
   { section: "Tools", requires: "act", items: [
     { href: "/demo", label: "Simulate (Demo)", d: ICONS.demo },

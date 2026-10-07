@@ -342,7 +342,7 @@ async def search(q: str = Query(..., min_length=2, max_length=100),
 
 
 @router.get("/rules")
-async def rules(_user: User = Depends(require_user)):
+async def rules(_admin: User = Depends(require_admin)):
     """Transparent view of the detection engine's thresholds and scoring rules.
     Sourced from the analyzer so the page always reflects the live configuration."""
     from backend.services.rule_governance import revision
@@ -532,7 +532,7 @@ async def run_rules_backtest(body: BacktestRequest, db: AsyncSession):
 async def rules_changes(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_user),
+    _admin: User = Depends(require_admin),
 ):
     """Tuning log: every detection-parameter change with before/after values,
     actor, rationale, and any backtest evidence attached at save time."""

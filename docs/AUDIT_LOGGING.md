@@ -34,6 +34,7 @@ Recording is best-effort by design: an audit-write failure never blocks the unde
 | `SETTINGS_UPDATED` | Any settings change (secrets summarized as "(changed)", never logged in value) |
 | Rule parameter changes | Audited **and** recorded in the `rule_changes` tuning log with before/after values, rationale, and backtest evidence |
 | `CHANGE_REQUESTED` / `CHANGE_APPROVED` / `CHANGE_REJECTED` / `CHANGE_CANCELLED` / `DUAL_CONTROL_INACTIVE` | Maker-checker lifecycle; `DUAL_CONTROL_INACTIVE` marks changes that applied directly because fewer than two admins existed |
+| `CONFIGURATION_APPROVED` | Protected rule/profile approval: identifies requester and approver; committed in the same transaction as the configuration and approval decision. Rule/profile changes never use `DUAL_CONTROL_INACTIVE`. |
 
 **Ingestion security**
 | Action | Recorded when |

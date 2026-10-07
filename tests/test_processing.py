@@ -136,23 +136,119 @@ def test_profile_persists_and_invalidates_rule_proposals(configuration_store):
 def test_rule_change_stores_server_replay_not_client_evidence(configuration_store):
     from backend.routers.settings import _exec_settings_update
     from backend.services import rule_governance as G
-    from backend.models import RuleChange
+    from backend.models import RuleChange, PendingApproval
+    import json
     async def run():
         await P.process(txn(id="replay-current", timestamp=datetime.utcnow(), is_cash=False))
         async with configuration_store() as db:
             old_usd = A.snapshot_rules()["ctr_thresholds"]["USD"]
-            result = await _exec_settings_update(db, {
+            payload = {
                 "rules": {"ctr_thresholds": {"USD": old_usd + 1000}},
                 "rules_rationale": "Observed volume review", "rules_base_version": G.revision(),
                 "rules_backtest": {"replayed": 987654321},
-            }, "operator", None)
+            }
+            db.add_all([User(username=name, role="admin", password_hash="unused") for name in ("maker", "checker")])
+            proposal = PendingApproval(action="SETTINGS_UPDATE", payload=json.dumps(payload),
+                                       requested_by="maker", summary="Review USD benchmark")
+            db.add(proposal)
+            await db.commit()
+            with pytest.raises(HTTPException) as exc:
+                await _exec_settings_update(db, payload, "checker", None)
+            assert exc.value.status_code == 403
+            result = await _exec_settings_update(db, payload, "checker", None, approval=proposal)
             assert result["saved"]
             row = (await db.execute(select(RuleChange))).scalar_one()
             assert row.backtest["replayed"] == 1
             assert row.backtest["storage_version"] == 1
             assert not row.backtest["initial_configuration"]
+            assert row.backtest["approval"]["requested_by"] == "maker"
+            assert proposal.status == "approved"
             # Behavioural tuning cannot move the fixed cash-reporting boundary.
             assert A.evaluate(txn(amount="10000.01"), [])["ctr"].required
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind", ["rules", "operating_profile"])
+def test_single_admin_configuration_is_always_pending(configuration_store, monkeypatch, kind):
+    from fastapi import FastAPI
+    from httpx import AsyncClient, ASGITransport
+    from backend.database import get_db
+    from backend.routers import settings as routes, approvals, audit
+    from backend.services import rule_governance as G, installation as I
+    from backend.models import PendingApproval
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.include_router(approvals.router)
+    async def sessions():
+        async with configuration_store() as db:
+            yield db
+    async def no_audit(*args, **kwargs):
+        pass
+    app.dependency_overrides[get_db] = sessions
+    monkeypatch.setattr(audit, "record", no_audit)
+    async def run():
+        before, original_profile = A.snapshot_rules(), I.profile()
+        async with configuration_store() as db:
+            admin = User(username="sole-admin", password_hash="unused", role="admin")
+            db.add(admin)
+            await db.commit()
+            header = {"Authorization": f"Bearer {create_token(admin)}"}
+        payload = {"rules": {"ctr_thresholds": {"KES": 250000}}, "rules_rationale": "Calibration",
+                   "rules_base_version": G.revision(), "rules_allow_empty_history": True} if kind == "rules" else {
+                   "operating_profile": {**original_profile, "institution_type": "fintech"},
+                   "profile_rationale": "Institution scope", "configuration_revision": G.revision()}
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            assert (await client.put("/settings", json=payload, headers={"X-API-Key": "machine-key"})).status_code == 401
+            response = await client.put("/settings", json={**payload, "configuration_before": {"password": "do-not-expose"}}, headers=header)
+            assert response.status_code == 200 and response.json()["pending"], response.text
+            assert A.snapshot_rules() == before and I.profile() == original_profile
+            proposals = (await client.get("/approvals", headers=header)).json()["pending"]
+            details = proposals[0]["configuration_proposal"]
+            assert details["kind"] == kind and not details["stale"]
+            assert details["before"] == (before if kind == "rules" else original_profile)
+            assert "do-not-expose" not in str(proposals)
+            identifier = response.json()["approval_id"]
+            assert (await client.post(f"/approvals/{identifier}/approve", headers=header)).status_code == 403
+            assert (await client.post(f"/approvals/{identifier}/cancel", headers=header)).status_code == 200
+            async with configuration_store() as db:
+                assert (await db.get(PendingApproval, identifier)).status == "cancelled"
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", ["maker_disabled", "maker_demoted", "checker_disabled", "self", "cancelled", "write_failure"])
+def test_protected_approval_failures_leave_configuration_unchanged(configuration_store, monkeypatch, failure):
+    import json
+    from backend.models import PendingApproval, RuleChange, AuditLog
+    from backend.services import rule_governance as G, dual_control
+    from backend.routers import settings as routes  # registers the protected executor
+    async def run():
+        before = A.snapshot_rules()
+        async with configuration_store() as db:
+            maker = User(username="maker", role="admin", password_hash="unused")
+            checker = User(username="checker", role="admin", password_hash="unused")
+            payload = {"rules": {"ctr_thresholds": {"KES": 250000}}, "rules_rationale": "Calibration",
+                       "rules_base_version": G.revision(), "rules_allow_empty_history": True}
+            proposal = PendingApproval(action="SETTINGS_UPDATE", payload=json.dumps(payload),
+                                       requested_by="maker", summary="Calibration")
+            db.add_all([maker, checker, proposal])
+            if failure == "maker_disabled": maker.is_active = False
+            if failure == "maker_demoted": maker.role = "viewer"
+            if failure == "checker_disabled": checker.is_active = False
+            if failure == "cancelled": proposal.status = "cancelled"
+            await db.commit()
+            identifier = proposal.id
+            if failure == "write_failure":
+                async def fail_commit():
+                    raise RuntimeError("Database unavailable")
+                monkeypatch.setattr(db, "commit", fail_commit)
+            with pytest.raises(RuntimeError if failure == "write_failure" else HTTPException):
+                await dual_control.execute_approval(db, None, maker if failure == "self" else checker, proposal)
+            assert A.snapshot_rules() == before
+            await db.rollback()
+        async with configuration_store() as db:
+            assert (await db.get(PendingApproval, identifier)).status == ("cancelled" if failure == "cancelled" else "pending")
+            assert not (await db.execute(select(RuleChange))).scalars().all()
+            assert not (await db.execute(select(AuditLog).where(AuditLog.action == "CONFIGURATION_APPROVED"))).scalars().all()
     asyncio.run(run())
 
 
@@ -176,13 +272,18 @@ def test_configuration_routes_and_second_person_approval(configuration_store, mo
     async def run():
         async with configuration_store() as db:
             users = [User(username=name, password_hash="unused", role=role) for name, role in
-                     [("maker", "admin"), ("checker", "admin"), ("viewer", "analyst")]]
+                     [("maker", "admin"), ("checker", "admin"), ("analyst", "analyst"), ("viewer", "viewer")]]
             db.add_all(users)
             await db.commit()
             headers = [{"Authorization": f"Bearer {create_token(user)}"} for user in users]
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            assert (await client.get("/settings/installation")).status_code == 401
-            assert (await client.get("/settings/installation", headers=headers[2])).status_code == 403
+            for path in ("/rules", "/rules/changes", "/settings", "/settings/system-info", "/settings/installation"):
+                assert (await client.get(path)).status_code == 401, path
+                for unauthorized in headers[2:]:
+                    assert (await client.get(path, headers=unauthorized)).status_code == 403, path
+                assert (await client.get(path, headers=headers[0])).status_code == 200, path
+            for unauthorized in headers[2:]:
+                assert (await client.post("/rules/backtest", json={"proposed": {}}, headers=unauthorized)).status_code == 403
             info = await client.get("/settings/installation", headers=headers[0])
             assert info.status_code == 200, info.text
             assert next(c for c in info.json()["checks"] if c["key"] == "operations")["state"] == "unverified"
@@ -192,7 +293,9 @@ def test_configuration_routes_and_second_person_approval(configuration_store, mo
             payload = {"rules": {"ctr_thresholds": {"KES": 250000}}, "rules_rationale": "Initial calibration", "rules_base_version": G.revision(), "rules_allow_empty_history": True}
             assert (await client.put("/settings", json={**payload, "rules_rationale": " "}, headers=headers[0])).status_code == 422
             assert (await client.put("/settings", json={**payload, "rules": {"typo": 1}}, headers=headers[0])).status_code == 422
-            assert (await client.put("/settings", json=payload, headers=headers[2])).status_code == 403
+            for unauthorized in headers[2:]:
+                assert (await client.put("/settings", json=payload, headers=unauthorized)).status_code == 403
+                assert (await client.get("/approvals", headers=unauthorized)).status_code == 403
             before = A.snapshot_rules()
             queued = await client.put("/settings", json=payload, headers=headers[0])
             assert queued.status_code == 200 and queued.json()["pending"], queued.text

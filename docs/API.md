@@ -59,13 +59,15 @@ Returns the verdict **synchronously**: risk score/level, the named signals that 
 
 | Endpoint | Role | Purpose |
 |---|---|---|
-| `GET /rules` | viewer+ | The live engine, fully transparent: thresholds per currency, detection windows, every scoring component, risk bands, sanctions config, National-Priorities mapping |
+| `GET /rules` | admin | Live engine configuration: thresholds per currency, detection windows, scoring components, risk bands, sanctions config, National-Priorities mapping |
 | `POST /rules/backtest` | admin | Replay stored history under proposed parameters — current vs. proposed flagged/SAR/CTR counts + changed examples; engine restored untouched |
-| `GET /rules/changes` | viewer+ | The tuning log: every change with before/after values, actor, rationale, attached backtest evidence |
+| `GET /rules/changes` | admin | The tuning log: every change with before/after values, actor, rationale, attached backtest evidence |
 
 Rule changes use `PUT /settings` with `rules`, a nonblank `rules_rationale`, and `rules_base_version` from `GET /rules`'s `revision`. Stale or missing revisions return 409. Unknown rule keys or invalid values return 422. Save rules separately from other settings. The server reruns the replay at application time and persists the full resulting rule snapshot and evidence before changing live values; the legacy client `rules_backtest` field is ignored. With no replay history, `rules_allow_empty_history: true` explicitly acknowledges initial configuration without historical validation.
 
-With two active administrators, changes return `pending: true` and do not apply until another administrator approves. Versions are rechecked and replay is rerun at approval time. Stale proposals must be cancelled and resubmitted. A successful rule update applies to future processing; it does not reclassify historical cases.
+Rule and operating-profile changes always return `pending: true` and do not apply until a different active administrator approves. There is no single-admin bypass, including initial configuration. API keys, viewers and analysts cannot propose or approve changes. Both accounts' active-admin status is rechecked when applying the change. Versions are rechecked and replay is rerun at approval time. The configuration, approval decision and approval audit record commit together. Stale proposals must be cancelled and resubmitted. A successful rule update applies to future processing; it does not reclassify historical cases.
+
+`GET /approvals` includes a sanitized `configuration_proposal` for pending rule/profile requests: before/proposed values, rationale, stale-version status and the no-history acknowledgement. Raw settings payloads and secrets are not returned. Other administrative changes retain their existing bootstrap behaviour.
 
 `GET /settings/installation` (admin) returns the current operating profile, shared configuration revision, installation checks, reporting scope, and operating limits. To confirm or update the profile, submit only `operating_profile` (`regulatory_jurisdiction`, `institution_type`, `business_timezone`), `configuration_revision`, and nonblank `profile_rationale` to `PUT /settings`. Institution types: `bank`, `credit_union`, `msb`, `fintech`, `other`. Timezones must be valid IANA names. Profile changes use the same approval and stale-version protections; they invalidate previously loaded rule proposals.
 

@@ -1,5 +1,8 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import RuleEngineSettings from "@/components/RuleEngineSettings";
+import InstallationSettings from "@/components/InstallationSettings";
 import { api, auth } from "@/lib/api";
 import type { Approval, ApprovalsPage } from "@/lib/api";
 import type { AuthUser, AuditEntry } from "@/types";
@@ -343,6 +346,8 @@ function ApprovalsSection({
   const [busy, setBusy] = useState<string | null>(null);
 
   async function decide(a: Approval, action: "approve" | "reject" | "cancel") {
+    if (action === "approve" && a.configuration_proposal && !window.confirm(
+      "Apply this detection configuration? Your approval and the requester's identity will be recorded. Review the proposed values and reason before confirming.")) return;
     setError(null);
     setBusy(a.id);
     try {
@@ -382,7 +387,7 @@ function ApprovalsSection({
           </span>
         ) : (
           <span className="text-xs font-medium px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">
-            Single-admin mode — add a second admin to activate dual control
+            Rule and profile changes require a different administrator
           </span>
         )}
       </div>
@@ -397,12 +402,23 @@ function ApprovalsSection({
             const mine = a.requested_by === approvals.me;
             return (
               <li key={a.id} className="py-3 flex items-center justify-between gap-4 flex-wrap">
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm text-gray-800">{a.summary}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     requested by <span className="font-medium">{mine ? "you" : a.requested_by}</span>{" "}
                     · {new Date(a.requested_at + "Z").toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
                   </p>
+                  {a.configuration_proposal && <div className="mt-3 space-y-2 border-l-2 border-blue-300 pl-3 text-xs text-gray-700">
+                    <p className="break-words"><span className="font-semibold">Reason:</span> {a.configuration_proposal.rationale}</p>
+                    {Object.entries(a.configuration_proposal.proposed).flatMap(([key, value]) =>
+                      key === "ctr_thresholds" ? Object.entries(value as Record<string, number>).map(([currency, amount]) => ({
+                        label: `${currency} benchmark`, before: (a.configuration_proposal!.before.ctr_thresholds as Record<string, number> | undefined)?.[currency], after: amount,
+                      })) : [{ label: key.replaceAll("_", " "), before: a.configuration_proposal!.before[key], after: value }]
+                    ).filter(change => JSON.stringify(change.before) !== JSON.stringify(change.after))
+                      .map(change => <p key={change.label} className="break-words"><span className="font-medium">{change.label}:</span> {JSON.stringify(change.before) ?? "Not recorded"} to {JSON.stringify(change.after)}</p>)}
+                    {a.configuration_proposal.initial_configuration_allowed && <p className="text-amber-800">Initial configuration without replay history is permitted by this proposal.</p>}
+                    {a.configuration_proposal.stale && <p className="font-medium text-red-700">Outdated proposal. Cancel or reject it and request a new proposal.</p>}
+                  </div>}
                 </div>
                 <div className="space-x-2 whitespace-nowrap">
                   {mine ? (
@@ -417,7 +433,7 @@ function ApprovalsSection({
                     <>
                       <button
                         onClick={() => decide(a, "approve")}
-                        disabled={busy === a.id}
+                        disabled={busy === a.id || !!a.configuration_proposal?.stale}
                         className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
                       >
                         Approve
@@ -545,10 +561,12 @@ function RolesPermissions() {
   );
 }
 
-type AdminTab = "system" | "account" | "users" | "roles" | "directory" | "integrations";
+type AdminTab = "system" | "rules" | "installation" | "account" | "users" | "roles" | "directory" | "integrations";
 
 const TABS: { key: AdminTab; label: string; adminOnly?: boolean }[] = [
-  { key: "system", label: "System Settings" },
+  { key: "system", label: "System", adminOnly: true },
+  { key: "rules", label: "Rule Engine", adminOnly: true },
+  { key: "installation", label: "Installation", adminOnly: true },
   { key: "account", label: "My Account" },
   { key: "users", label: "Users", adminOnly: true },
   { key: "roles", label: "Roles & Permissions", adminOnly: true },
@@ -557,11 +575,24 @@ const TABS: { key: AdminTab; label: string; adminOnly?: boolean }[] = [
 ];
 
 export default function SettingsPage() {
+  return <Suspense fallback={<p role="status" className="p-6 text-sm text-gray-500">Loading settings...</p>}><SettingsContent /></Suspense>;
+}
+
+function SettingsContent() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [tab, setTab] = useState<AdminTab>("system");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tab = TABS.find(t => t.key === searchParams.get("tab"))?.key ?? "system";
+  function selectTab(key: AdminTab) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", key);
+    router.push(`/settings?${params}`, { scroll: false });
+    setNotice(null);
+    setError(null);
+  }
   const [sysInfo, setSysInfo] = useState<Record<string, any> | null>(null);
   const [health, setHealth] = useState<{ bank_db_connected: boolean; last_poll_at: string | null } | null>(null);
   const [testResult, setTestResult] = useState<{ connected: boolean; message: string } | null>(null);
@@ -660,18 +691,35 @@ export default function SettingsPage() {
   const fields: string[] = data.mappable_fields ?? [];
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Administration</h1>
+        <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
         <p className="text-sm text-gray-500 mt-1">Manage system configuration, users, and access.</p>
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-gray-200">
+      <div role="tablist" aria-label="Settings" className="flex flex-wrap gap-1 border-b border-gray-200">
         {TABS.filter((t) => !t.adminOnly || isAdmin).map((t) => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key); setNotice(null); setError(null); }}
+            type="button"
+            role="tab"
+            id={`settings-tab-${t.key}`}
+            aria-selected={tab === t.key}
+            aria-controls="settings-panel"
+            tabIndex={tab === t.key ? 0 : -1}
+            onClick={() => selectTab(t.key)}
+            onKeyDown={event => {
+              const tabs = TABS.filter(item => !item.adminOnly || isAdmin);
+              const index = tabs.findIndex(item => item.key === t.key);
+              const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
+                : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length
+                : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+              if (next < 0) return;
+              event.preventDefault();
+              document.getElementById(`settings-tab-${tabs[next].key}`)?.focus();
+              selectTab(tabs[next].key);
+            }}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
               tab === t.key ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
@@ -693,7 +741,10 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {tab === "system" && (<>
+      <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} tabIndex={0} className="space-y-6">
+      {tab === "rules" && isAdmin && <RuleEngineSettings />}
+      {tab === "installation" && isAdmin && <InstallationSettings />}
+      {tab === "system" && isAdmin && (<>
       {/* Bank database */}
       <Section
         title="Bank Database"
@@ -989,16 +1040,15 @@ export default function SettingsPage() {
       {/* Security */}
       <Section
         title="Security"
-        subtitle="API key protecting cases, reports, and this settings page"
+        subtitle="Machine authentication. Administrator sign-in is required for configuration changes."
         saving={saving === "security"}
         onSave={() => save("security", { security: { fms_api_key: data.security.fms_api_key ?? "" } })}
       >
         <div className="grid grid-cols-2 gap-4">
           <Field
-            label={`FMS API key ${data.security.api_key_set ? "(set)" : "(not set — API is open)"}`}
+            label={`FMS machine API key ${data.security.api_key_set ? "(set)" : "(not set)"}`}
             value={data.security.fms_api_key ?? ""}
             type="password"
-            placeholder="Set to require X-API-Key on all requests"
             onChange={(v) => set(["security", "fms_api_key"], v)}
             hint="Takes effect immediately. Machine API keys must stay server-side; do not expose this value in NEXT_PUBLIC_* variables."
           />
@@ -1186,10 +1236,11 @@ export default function SettingsPage() {
             an <code className="font-mono text-xs bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">X-API-Key</code> header and receives the risk verdict in the same response.
           </p>
           <p className="text-xs text-gray-400 mt-2">
-            The ingestion key is set on the server as <code className="font-mono">FMS_INGEST_API_KEY</code>. No bank database access is required in API mode (see System Settings → Monitoring).
+            The ingestion key is set on the server as <code className="font-mono">FMS_INGEST_API_KEY</code>. No bank database access is required in API mode (see System → Monitoring).
           </p>
         </section>
       </>)}
+      </div>
     </div>
   );
 }

@@ -18,9 +18,11 @@ This document supersedes older pipeline excerpts and regulatory claims in the Ju
 
 ## Installation and Tuning
 
-The Installation screen records institution type, jurisdiction and IANA business timezone, and distinguishes configuration checks from unverified operating controls. Rule Engine edits all configured currency benchmarks and can add currencies. Changes require a reason, current configuration revision and server-run replay; no-history initial configuration requires explicit acknowledgement. With two active administrators, proposals await another administrator's approval. Stale proposals are rejected, failed database writes do not change live configuration, and saved snapshots are restored on restart. New transaction assessments include their operating profile alongside their rule snapshot.
+The Installation screen records institution type, jurisdiction and IANA business timezone, and distinguishes configuration checks from unverified operating controls. Rule Engine opens read-only; administrators can propose changes to currency benchmarks and detection windows. Every rule/profile proposal requires a different active administrator's approval, even with only one admin enrolled. Both accounts must still be active admins when applying the change. A reason, current configuration revision and server-run replay are required; no-history initial configuration requires explicit acknowledgement. The protected change, approval decision and approval audit record commit together. Stale or cancelled proposals are rejected, failed database writes do not change live configuration, and saved snapshots are restored on restart. New transaction assessments include their operating profile alongside their rule snapshot.
 
 See [Small-Institution Setup](SMALL_INSTITUTION_SETUP.md) for storage precedence, onboarding checks and boundaries. No new schema migration or automatic regulatory regime has been added.
+
+The mandatory-approval hardening passed 108 backend tests, TypeScript checking and a production build. Local browser checks confirmed read-only thresholds, single-admin proposals remaining pending without changing live values, no self-approval action, and cancellation. The existing render-time ref access in Administration still triggers its React lint rule; Rule Engine passes focused lint. This is application-level access control, not protection against a host/database administrator or shared approval accounts.
 
 ## Reporting Scope
 

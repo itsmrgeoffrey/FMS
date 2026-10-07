@@ -2,11 +2,12 @@
 import asyncio
 import hashlib
 import json
+from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from backend.models import AuditLog, RuleChange
+from backend.models import AuditLog, PendingApproval, RuleChange, User
 from backend.services import analyzer
 
 _change_lock = asyncio.Lock()
@@ -30,7 +31,27 @@ async def restore_latest(db):
         analyzer.restore_rules(row.new_values)
 
 
-async def apply_profile(db, value, rationale, base_version, actor):
+async def _commit_change(db, approval, actor):
+    if approval is not None:
+        if approval.requested_by == actor:
+            raise HTTPException(403, "A different administrator must approve this change.")
+        admins = (await db.execute(select(User.username).where(
+            User.username.in_([approval.requested_by, actor]),
+            User.role == "admin", User.is_active.is_(True)))).scalars().all()
+        if len(set(admins)) != 2:
+            raise HTTPException(403, "Both requester and approver must still be active administrators.")
+        decision = await db.execute(update(PendingApproval).where(
+            PendingApproval.id == approval.id, PendingApproval.status == "pending",
+            PendingApproval.action == "SETTINGS_UPDATE").values(
+                status="approved", decided_by=actor, decided_at=datetime.utcnow()))
+        if decision.rowcount != 1:
+            raise HTTPException(409, "This proposal is no longer pending.")
+        db.add(AuditLog(username=actor, action="CONFIGURATION_APPROVED", target=approval.id,
+                        detail=f"Requested by {approval.requested_by}; approved by {actor}. {approval.summary}"))
+    await db.commit()
+
+
+async def apply_profile(db, value, rationale, base_version, actor, *, approval=None):
     from backend.services.installation import OperatingProfile, activate, profile
     async with _change_lock:
         if base_version != revision():
@@ -41,12 +62,12 @@ async def apply_profile(db, value, rationale, base_version, actor):
         db.add(AuditLog(username=actor, action="PROFILE_UPDATED", target="installation",
                        detail=json.dumps({"old_values": profile(), "new_values": checked,
                                           "rationale": rationale.strip()})))
-        await db.commit()
+        await _commit_change(db, approval, actor)
         activate(checked)
         return {"saved": True, "restart_required": False}
 
 
-async def apply_change(db, rules, rationale, base_version, actor, allow_empty=False):
+async def apply_change(db, rules, rationale, base_version, actor, allow_empty=False, *, approval=None):
     from backend.routers.insights import BacktestRequest, run_rules_backtest
     from backend.services.installation import profile
 
@@ -71,14 +92,18 @@ async def apply_change(db, rules, rationale, base_version, actor, allow_empty=Fa
         finally:
             analyzer.restore_rules(before)
         if before == after:
+            await _commit_change(db, approval, actor)
             return {"saved": False, "restart_required": False, "rules_revision": revision()}
         evidence = {**result, "storage_version": 1, "initial_configuration": not result["replayed"],
                     "operating_profile": profile(), "base_revision": base_version}
+        if approval is not None:
+            evidence["approval"] = {"id": approval.id, "requested_by": approval.requested_by,
+                                    "approved_by": actor}
         db.add(RuleChange(changed_by=actor, old_values=before, new_values=after,
                           rationale=reason, backtest=evidence))
         db.add(AuditLog(username=actor, action="RULES_UPDATED", target="rules", detail=reason))
         # A failed database write must leave the live rules unchanged.
-        await db.commit()
+        await _commit_change(db, approval, actor)
         analyzer.restore_rules(after)
         return {"saved": True, "restart_required": False, "rules_revision": revision(),
                 "backtest": result}

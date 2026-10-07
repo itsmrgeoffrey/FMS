@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.auth import require_admin
 from backend.config import APP_VERSION, ENVIRONMENT, ROOT, bank_config, settings
 from backend.database import get_db
-from backend.models import User
+from backend.models import PendingApproval, User
 from backend.routers import audit
 from backend.services import dual_control, poller
 from backend.services.installation import OperatingProfile
@@ -306,16 +306,19 @@ async def get_installation(db: AsyncSession = Depends(get_db)):
 
 
 @dual_control.register("SETTINGS_UPDATE")
-async def _exec_settings_update(db: AsyncSession, payload: dict, actor: str, request: Request | None) -> dict:
+async def _exec_settings_update(db: AsyncSession, payload: dict, actor: str, request: Request | None,
+                                *, approval: PendingApproval | None = None) -> dict:
     body = SettingsUpdate(**payload)
+    if dual_control.requires_independent_approval("SETTINGS_UPDATE", payload) and approval is None:
+        raise HTTPException(403, "Detection configuration requires independent approval.")
     if body.operating_profile is not None:
         from backend.services.rule_governance import apply_profile
         return await apply_profile(db, body.operating_profile.model_dump(), body.profile_rationale,
-                                   body.configuration_revision, actor)
+                                   body.configuration_revision, actor, approval=approval)
     if body.rules is not None:
         from backend.services.rule_governance import apply_change
         return await apply_change(db, body.rules, body.rules_rationale, body.rules_base_version,
-                                  actor, body.rules_allow_empty_history)
+                                  actor, body.rules_allow_empty_history, approval=approval)
     return await _apply_settings(body, actor, request)
 
 
@@ -326,8 +329,7 @@ async def update_settings(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
-    """Configuration changes are dual-controlled: with two or more active admins,
-    a save is queued until a second admin approves it (see dual_control.py)."""
+    """Rules and operating profiles always require independent approval."""
     sections = [k for k in ("database", "tables", "rules", "monitoring", "institution",
                             "alerts", "llm", "security", "integrations", "directory", "operating_profile")
                 if getattr(body, k) is not None]
@@ -354,10 +356,17 @@ async def update_settings(
             analyzer.validate_rule_overrides(body.rules)
         except (TypeError, ValueError) as exc:
             raise HTTPException(422, str(exc)) from exc
+    payload = body.model_dump(exclude_none=True)
+    if body.rules is not None:
+        from backend.services.analyzer import snapshot_rules
+        payload["configuration_before"] = snapshot_rules()
+    elif body.operating_profile is not None:
+        from backend.services.installation import profile
+        payload["configuration_before"] = profile()
     return await dual_control.submit_or_execute(
         db, request, user,
         action="SETTINGS_UPDATE",
-        payload=body.model_dump(exclude_none=True),
+        payload=payload,
         summary="Update settings: " + ", ".join(sections),
         target="settings",
     )

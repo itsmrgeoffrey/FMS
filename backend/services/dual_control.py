@@ -20,6 +20,9 @@ explicitly, and the audit entry is tagged, so the state is visible rather than
 silent. Institutions should create a second admin promptly; dual control
 activates by itself the moment they do.
 
+Detection rules and operating profiles NEVER use the single-admin exception.
+They remain pending until a different active administrator approves them.
+
 Executors are registered by the modules that own the logic (auth_routes,
 settings) via :func:`register`, which keeps this module free of circular
 imports. An executor receives the JSON payload stored at request time and
@@ -35,7 +38,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models import PendingApproval, User
+from backend.models import AuditLog, PendingApproval, User
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +66,11 @@ async def dual_control_active(db: AsyncSession) -> bool:
     return (await active_admin_count(db)) >= 2
 
 
+def requires_independent_approval(action: str, payload: dict) -> bool:
+    return action == "SETTINGS_UPDATE" and any(
+        payload.get(key) is not None for key in ("rules", "operating_profile"))
+
+
 async def submit_or_execute(
     db: AsyncSession,
     request: Request | None,
@@ -79,7 +87,8 @@ async def submit_or_execute(
     if action not in EXECUTORS:
         raise HTTPException(status_code=500, detail=f"No executor registered for action {action!r}")
 
-    if await dual_control_active(db):
+    protected = requires_independent_approval(action, payload)
+    if protected or await dual_control_active(db):
         approval = PendingApproval(
             action=action,
             payload=json.dumps(payload),
@@ -88,15 +97,19 @@ async def submit_or_execute(
             requested_by=admin.username,
         )
         db.add(approval)
+        if protected:
+            db.add(AuditLog(username=admin.username, action="CHANGE_REQUESTED", target=target,
+                            detail=summary + " (independent approval required)"))
         await db.commit()
         await db.refresh(approval)
-        await audit.record(admin.username, "CHANGE_REQUESTED", target=target,
-                           detail=f"[{approval.id[:8]}] {summary}", request=request)
+        if not protected:
+            await audit.record(admin.username, "CHANGE_REQUESTED", target=target,
+                               detail=f"[{approval.id[:8]}] {summary}", request=request)
         return {
             "pending": True,
             "approval_id": approval.id,
             "summary": summary,
-            "message": "Dual control is active: a second admin must approve this change before it takes effect.",
+            "message": "A different active administrator must approve this change before it takes effect.",
         }
 
     result = await EXECUTORS[action](db, payload, admin.username, request)
@@ -116,7 +129,11 @@ async def execute_approval(
     executor = EXECUTORS.get(approval.action)
     if executor is None:
         raise HTTPException(status_code=500, detail=f"No executor registered for action {approval.action!r}")
-    result = await executor(db, json.loads(approval.payload), checker.username, request)
+    payload = json.loads(approval.payload)
+    if requires_independent_approval(approval.action, payload):
+        # The protected executor commits the decision and configuration together.
+        return await executor(db, payload, checker.username, request, approval=approval)
+    result = await executor(db, payload, checker.username, request)
     approval.status = "approved"
     approval.decided_by = checker.username
     approval.decided_at = datetime.utcnow()
