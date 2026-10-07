@@ -111,6 +111,10 @@ async def _metrics_flush_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from backend.database import SessionLocal
+    from backend.services.rule_governance import restore_latest
+    async with SessionLocal() as db:
+        await restore_latest(db)
     poll_task = asyncio.create_task(poller.poll_loop())
     ofac_task = asyncio.create_task(_ofac_refresh_loop())
     retention_task = asyncio.create_task(_retention_loop())

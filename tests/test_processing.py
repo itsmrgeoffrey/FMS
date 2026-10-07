@@ -53,16 +53,185 @@ def test_cash_boundary_and_no_ctr_for_wire():
     assert A.evaluate(txn(is_cash=None), [])["ctr"].trigger == "MANUAL_REVIEW"
 
 
+@pytest.fixture
+def configuration_store(store, monkeypatch):
+    from backend.services import installation, rule_governance
+    before, original_profile = A.snapshot_rules(), installation.profile()
+    monkeypatch.setattr(rule_governance, "_change_lock", asyncio.Lock())
+    yield store
+    A.restore_rules(before)
+    installation.activate(original_profile)
+
+
+def test_rule_changes_require_reason_revision_and_initial_ack(configuration_store):
+    from backend.services import rule_governance as G
+    from backend.models import RuleChange, AuditLog
+    async def run():
+        before = A.snapshot_rules()
+        rules = {"ctr_thresholds": {"KES": 250000}}
+        async with configuration_store() as db:
+            for reason, version, ack, status in [
+                ("", G.revision(), True, 422), ("Review", "stale", True, 409),
+                ("Review", G.revision(), False, 422),
+            ]:
+                with pytest.raises(HTTPException) as exc:
+                    await G.apply_change(db, rules, reason, version, "operator", ack)
+                assert exc.value.status_code == status
+                assert A.snapshot_rules() == before
+            version = G.revision()
+            result = await G.apply_change(db, rules, "Initial KES calibration", version, "operator", True)
+            assert result["saved"] and G.revision() != version
+            assert A.snapshot_rules()["ctr_thresholds"]["KES"] == 250000
+            row = (await db.execute(select(RuleChange))).scalar_one()
+            assert row.rationale == "Initial KES calibration"
+            assert row.backtest["initial_configuration"] and row.backtest["replayed"] == 0
+            assert row.backtest["base_revision"] == version
+            assert "institution_type" in row.backtest["operating_profile"]
+            assert (await db.execute(select(AuditLog.action))).scalar_one() == "RULES_UPDATED"
+            A.restore_rules(before)
+            await G.restore_latest(db)
+            assert A.snapshot_rules() == row.new_values
+    asyncio.run(run())
+
+
+def test_configuration_write_failure_keeps_live_values(configuration_store, monkeypatch):
+    from backend.services import rule_governance as G, installation as I
+    async def run():
+        before, profile = A.snapshot_rules(), I.profile()
+        async with configuration_store() as db:
+            async def failed_commit():
+                raise RuntimeError("Database unavailable")
+            monkeypatch.setattr(db, "commit", failed_commit)
+            with pytest.raises(RuntimeError, match="Database unavailable"):
+                await G.apply_change(db, {"ctr_thresholds": {"KES": 200000}}, "Calibration", G.revision(), "operator", True)
+            assert A.snapshot_rules() == before
+            await db.rollback()
+            with pytest.raises(RuntimeError, match="Database unavailable"):
+                await G.apply_profile(db, {**profile, "regulatory_jurisdiction": "NG"}, "Local scope", G.revision(), "operator")
+            assert I.profile() == profile
+    asyncio.run(run())
+
+
+def test_profile_persists_and_invalidates_rule_proposals(configuration_store):
+    from backend.services import rule_governance as G, installation as I
+    async def run():
+        original, old_revision = I.profile(), G.revision()
+        async with configuration_store() as db:
+            changed = {"regulatory_jurisdiction": "NG", "institution_type": "fintech", "business_timezone": "Africa/Lagos"}
+            await G.apply_profile(db, changed, "Confirm institution scope", old_revision, "operator")
+            assert I.profile() == changed and G.revision() != old_revision
+            assert (await I.inspect(db))["reporting_scope"].startswith("Manual")
+            with pytest.raises(HTTPException) as exc:
+                await G.apply_change(db, {"rolling_window_days": 7}, "Review", old_revision, "operator", True)
+            assert exc.value.status_code == 409
+            I.activate(original)
+            await G.restore_latest(db)
+            assert I.profile() == changed
+            analysis = await A.analyze(txn(), [])
+            assert analysis.assessed_rules["operating_profile"] == changed
+            assert analysis.regulatory_review
+    asyncio.run(run())
+
+
+def test_rule_change_stores_server_replay_not_client_evidence(configuration_store):
+    from backend.routers.settings import _exec_settings_update
+    from backend.services import rule_governance as G
+    from backend.models import RuleChange
+    async def run():
+        await P.process(txn(id="replay-current", timestamp=datetime.utcnow(), is_cash=False))
+        async with configuration_store() as db:
+            old_usd = A.snapshot_rules()["ctr_thresholds"]["USD"]
+            result = await _exec_settings_update(db, {
+                "rules": {"ctr_thresholds": {"USD": old_usd + 1000}},
+                "rules_rationale": "Observed volume review", "rules_base_version": G.revision(),
+                "rules_backtest": {"replayed": 987654321},
+            }, "operator", None)
+            assert result["saved"]
+            row = (await db.execute(select(RuleChange))).scalar_one()
+            assert row.backtest["replayed"] == 1
+            assert row.backtest["storage_version"] == 1
+            assert not row.backtest["initial_configuration"]
+            # Behavioural tuning cannot move the fixed cash-reporting boundary.
+            assert A.evaluate(txn(amount="10000.01"), [])["ctr"].required
+    asyncio.run(run())
+
+
+def test_configuration_routes_and_second_person_approval(configuration_store, monkeypatch):
+    from fastapi import FastAPI
+    from httpx import AsyncClient, ASGITransport
+    from backend.database import get_db
+    from backend.models import PendingApproval
+    from backend.routers import settings as routes, insights, approvals, audit
+    from backend.services import rule_governance as G, installation as I
+    app = FastAPI()
+    for router in (routes.router, insights.router, approvals.router):
+        app.include_router(router)
+    async def sessions():
+        async with configuration_store() as db:
+            yield db
+    async def no_audit(*args, **kwargs):
+        pass
+    app.dependency_overrides[get_db] = sessions
+    monkeypatch.setattr(audit, "record", no_audit)
+    async def run():
+        async with configuration_store() as db:
+            users = [User(username=name, password_hash="unused", role=role) for name, role in
+                     [("maker", "admin"), ("checker", "admin"), ("viewer", "analyst")]]
+            db.add_all(users)
+            await db.commit()
+            headers = [{"Authorization": f"Bearer {create_token(user)}"} for user in users]
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            assert (await client.get("/settings/installation")).status_code == 401
+            assert (await client.get("/settings/installation", headers=headers[2])).status_code == 403
+            info = await client.get("/settings/installation", headers=headers[0])
+            assert info.status_code == 200, info.text
+            assert next(c for c in info.json()["checks"] if c["key"] == "operations")["state"] == "unverified"
+            assert next(c for c in info.json()["checks"] if c["key"] == "admins")["state"] == "configured"
+            invalid = {"operating_profile": {**I.profile(), "business_timezone": "Invalid/Timezone"}, "profile_rationale": "Scope", "configuration_revision": G.revision()}
+            assert (await client.put("/settings", json=invalid, headers=headers[0])).status_code == 422
+            payload = {"rules": {"ctr_thresholds": {"KES": 250000}}, "rules_rationale": "Initial calibration", "rules_base_version": G.revision(), "rules_allow_empty_history": True}
+            assert (await client.put("/settings", json={**payload, "rules_rationale": " "}, headers=headers[0])).status_code == 422
+            assert (await client.put("/settings", json={**payload, "rules": {"typo": 1}}, headers=headers[0])).status_code == 422
+            assert (await client.put("/settings", json=payload, headers=headers[2])).status_code == 403
+            before = A.snapshot_rules()
+            queued = await client.put("/settings", json=payload, headers=headers[0])
+            assert queued.status_code == 200 and queued.json()["pending"], queued.text
+            assert A.snapshot_rules() == before
+            queued2 = await client.put("/settings", json={**payload, "rules": {"ctr_thresholds": {"KES": 350000}}}, headers=headers[0])
+            first = queued.json()["approval_id"]
+            assert (await client.post(f"/approvals/{first}/approve", headers=headers[0])).status_code == 403
+            approved = await client.post(f"/approvals/{first}/approve", headers=headers[1])
+            assert approved.status_code == 200, approved.text
+            assert A.snapshot_rules()["ctr_thresholds"]["KES"] == 250000
+            second = queued2.json()["approval_id"]
+            assert (await client.post(f"/approvals/{second}/approve", headers=headers[1])).status_code == 409
+            async with configuration_store() as db:
+                assert (await db.get(PendingApproval, second)).status == "pending"
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("rules", [
     {"ctr_thresholds": {"USD": 20000, "EUR": -1}},
     {"rolling_window_days": 0}, {"rolling_window_days": 1.5},
     {"smurfing_window_hours": float("inf")}, {"structuring_band_ratio": 1},
+    {"rolling_window_days": True}, {"ctr_thresholds": {"USD": True}}, {"unknown_rule": 1},
 ])
 def test_invalid_rules_do_not_partially_change_engine(rules):
     before = A.snapshot_rules()
     with pytest.raises(ValueError):
         A.apply_rule_overrides(rules)
     assert A.snapshot_rules() == before
+
+
+@pytest.mark.parametrize("value", [
+    {"business_timezone": "Invalid/Zone"}, {"institution_type": "unsupported"},
+    {"regulatory_jurisdiction": "USA"}, {"unexpected": True},
+])
+def test_invalid_operating_profile_is_rejected(value):
+    from pydantic import ValidationError
+    from backend.services.installation import OperatingProfile, profile
+    with pytest.raises(ValidationError):
+        OperatingProfile(**{**profile(), **value})
 
 
 def test_unavailable_and_stale_screening_require_review(store, monkeypatch):

@@ -85,12 +85,20 @@ SMURFING_WINDOW_HOURS = 48
 STRUCTURING_BAND_RATIO = 0.9   # bottom of near-threshold band = 90% of high-value threshold
 
 def validate_rule_overrides(rules: dict) -> dict:
+    if not isinstance(rules, dict):
+        raise ValueError("Rules must be an object")
+    unknown = set(rules) - {"ctr_thresholds", "sar_ratio", "structuring_band_ratio",
+                            "rolling_window_days", "smurfing_window_hours"}
+    if unknown:
+        raise ValueError("Unsupported rule settings: " + ", ".join(sorted(unknown)))
     values = dict(rules)
     if "ctr_thresholds" in values:
         if not isinstance(values["ctr_thresholds"], dict):
             raise ValueError("Behavioral benchmarks must be a currency-to-amount mapping")
         thresholds = {}
         for currency, raw in values["ctr_thresholds"].items():
+            if isinstance(raw, bool):
+                raise ValueError("Behavioral benchmarks must be numeric amounts, not booleans")
             currency = str(currency).upper()
             number = float(raw)
             if not re.fullmatch(r"[A-Z]{3}", currency) or not math.isfinite(number) or number <= 0:
@@ -99,6 +107,8 @@ def validate_rule_overrides(rules: dict) -> dict:
         values["ctr_thresholds"] = thresholds
     for key, maximum in (("rolling_window_days", 365), ("smurfing_window_hours", 8760)):
         if key in values:
+            if isinstance(values[key], bool):
+                raise ValueError(f"{key} must be a number, not a boolean")
             number = float(values[key])
             if not math.isfinite(number) or not number.is_integer() or not 1 <= number <= maximum:
                 raise ValueError(f"{key} must be a whole number between 1 and {maximum}")
@@ -114,7 +124,7 @@ def validate_rule_overrides(rules: dict) -> dict:
 
 def apply_rule_overrides(rules: dict) -> None:
     """Apply operator-tuned detection parameters (from bank_config 'rules').
-    Called at import and live from the settings API. Unknown keys are ignored."""
+    Called at import and live from the settings API. Unknown keys are rejected."""
     global SAR_RATIO, STRUCTURING_BAND_RATIO, ROLLING_WINDOW_DAYS, SMURFING_WINDOW_HOURS
     if not rules:
         return
@@ -862,7 +872,8 @@ def evaluate(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -
 # ─── Main entry point ─────────────────────────────────────────────────────────
 
 async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> FraudAnalysis:
-    assessed_rules = snapshot_rules()
+    from backend.services.installation import profile as operating_profile
+    assessed_rules = {**snapshot_rules(), "operating_profile": operating_profile()}
     verdict = evaluate(txn, history)
     threshold, profile, ctr, risk = verdict["threshold"], verdict["profile"], verdict["ctr"], verdict["risk"]
     is_fraudulent, confidence = verdict["is_fraudulent"], verdict["confidence"]

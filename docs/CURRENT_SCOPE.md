@@ -16,7 +16,13 @@ This document supersedes older pipeline excerpts and regulatory claims in the Ju
 - Alerts and Transactions use server-side filters and pagination, with visible load errors. The simulator displays an assessment, not a successful funds transfer.
 - Dashboard puts highest-risk open reviews first and labels current versus all-time indicators. Alerts supports full-queue account/source/reference search, status, reporting flags, minimum risk, and sorting; mobile entries show amount, flags, risk and status without a wide table. Transaction Details separates detection, screening and reporting, exposes source identifiers, and asks for confirmation before terminal dispositions. Existing colours and navigation are retained. Investigation workspaces and report filing are still deferred.
 
-## Reporting Boundaries
+## Installation and Tuning
+
+The Installation screen records institution type, jurisdiction and IANA business timezone, and distinguishes configuration checks from unverified operating controls. Rule Engine edits all configured currency benchmarks and can add currencies. Changes require a reason, current configuration revision and server-run replay; no-history initial configuration requires explicit acknowledgement. With two active administrators, proposals await another administrator's approval. Stale proposals are rejected, failed database writes do not change live configuration, and saved snapshots are restored on restart. New transaction assessments include their operating profile alongside their rule snapshot.
+
+See [Small-Institution Setup](SMALL_INSTITUTION_SETUP.md) for storage precedence, onboarding checks and boundaries. No new schema migration or automatic regulatory regime has been added.
+
+## Reporting Scope
 
 The supported automatic assessment is a **US bank / USD** review rule, selected by `REGULATORY_JURISDICTION=US` and `INSTITUTION_TYPE=bank`. Other combinations require manual reporting assessment; no FX conversion or foreign law is inferred.
 
@@ -52,5 +58,7 @@ npm audit --omit=dev
 The Python environment audit and frontend production-dependency audit reported zero known vulnerabilities during this change. The full npm audit still reports a development-only `braces` advisory (GHSA-vfj7-8cjw-p6xm) through ESLint's dependency chain; no compatible patched release was available. Production Docker output uses Next's standalone bundle rather than copying all development dependencies. Recheck advisories before release.
 
 See [ROADMAP.md](../ROADMAP.md) for features intentionally not built in this phase.
+
+The small-institution configuration pass passed 100 Python tests against an isolated SQLite configuration, a production frontend build, and focused lint on Rule Engine and Installation. Coverage includes required rationale, stale proposals, failed configuration writes, server-owned replay evidence, restart restoration, privilege checks and second-person approval. Browser verification used a separate synthetic-data database and checked profile scope, currency additions, preview invalidation, recorded changes and mobile layouts. Server-database compatibility and real institution workflows still need deployment-specific verification.
 
 Focused lint checks cover Dashboard, Alerts, Transaction Details, and their changed shared controls. The UI pass passed the production build and 88 Python tests, including server-filter and dashboard-contract coverage. Local browser checks cover desktop/mobile layouts, search, filter/reset behaviour, decision confirmation and review audit updates using synthetic data. The pre-existing synchronous state initialization in `AppShell` still fails the stricter React effect lint rule; a broad UI cleanup remains deferred. A successful production build is not a claim that every existing lint warning or UI issue has been resolved.

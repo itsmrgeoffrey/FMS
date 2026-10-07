@@ -345,7 +345,9 @@ async def search(q: str = Query(..., min_length=2, max_length=100),
 async def rules(_user: User = Depends(require_user)):
     """Transparent view of the detection engine's thresholds and scoring rules.
     Sourced from the analyzer so the page always reflects the live configuration."""
+    from backend.services.rule_governance import revision
     return {
+        "revision": revision(),
         "regulatory_thresholds": {
             "ctr_by_currency": A._CTR_THRESHOLDS,
             "sar_ratio_of_ctr": A.SAR_RATIO,
@@ -364,7 +366,7 @@ async def rules(_user: User = Depends(require_user)):
             {"name": "Near-threshold amount", "points": "20", "detail": "Amount in the structuring band just below the behavioral benchmark."},
             {"name": "Velocity clustering", "points": "25", "detail": "Multiple sub-threshold transfers over the rolling window that together exceed it."},
             {"name": "Outward smurfing", "points": "20", "detail": "Same-counterparty same-day accumulation crossing the threshold."},
-            {"name": "Multi-source smurfing", "points": "25", "detail": "3+ distinct senders in 48h whose combined inflow exceeds the threshold."},
+            {"name": "Multi-source smurfing", "points": "25", "detail": f"3+ distinct senders in {A.SMURFING_WINDOW_HOURS}h whose combined inflow exceeds the threshold."},
             {"name": "New counterparty", "points": "6–12", "detail": "First transaction with this counterparty."},
             {"name": "Odd hours", "points": "8", "detail": "Transaction between 01:00 and 05:00."},
             {"name": "New channel", "points": "5", "detail": "Channel not previously used by the account."},
@@ -428,6 +430,10 @@ async def rules_backtest(
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
+    return await run_rules_backtest(body, db)
+
+
+async def run_rules_backtest(body: BacktestRequest, db: AsyncSession):
     """What would this parameter change have flagged historically? Replays the
     stored ingested transactions through the SAME deterministic engine under
     current vs. proposed parameters and reports the difference — evidence for
@@ -436,6 +442,12 @@ async def rules_backtest(
     the duration of the replay, then restored."""
     from backend.models import TransactionProcessing
     from backend.services.processing import from_row, deserialize
+
+    try:
+        A.validate_rule_overrides(body.proposed)
+    except (TypeError, ValueError) as exc:
+        from fastapi import HTTPException
+        raise HTTPException(422, str(exc)) from exc
 
     cutoff = datetime.utcnow() - timedelta(days=max(1, min(body.days, 365)))
     limit = max(10, min(body.limit, 20_000))
@@ -456,7 +468,11 @@ async def rules_backtest(
     normalized = sorted(transactions.values(), key=lambda n: (n.timestamp, n.source_table, n.id))[-limit:]
     if not normalized:
         return {"error": "No stored transactions in the replay window.",
-                "replayed": 0}
+                "replayed": 0, "window_days": max(1, min(body.days, 365)),
+                "current": {"flagged": 0, "sar_recommended": 0, "ctr_required": 0},
+                "proposed": {"flagged": 0, "sar_recommended": 0, "ctr_required": 0},
+                "changed_count": 0, "changed_examples": [],
+                "note": "Initial configuration only; no historical validation was performed."}
 
     # The evaluate() loop is fully synchronous — no awaits between apply and
     # restore — so the temporary parameter swap can't leak into live requests
@@ -496,7 +512,7 @@ async def rules_backtest(
 
     return {
         "replayed": len(normalized),
-        "window_days": body.days,
+        "window_days": max(1, min(body.days, 365)),
         "note": "Replay of stored API and polled transactions through the deterministic engine. "
                 "Exact processing snapshots are preferred; legacy cash classification may be unknown. "
                 "Account history is approximated within the replay window; sanctions screening "

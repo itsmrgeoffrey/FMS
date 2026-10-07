@@ -46,6 +46,7 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
     { href: "/audit", label: "Audit Trail", d: ICONS.audit, requires: "admin" },
   ] },
   { section: "System", requires: "admin", items: [
+    { href: "/setup", label: "Installation", d: ICONS.admin },
     { href: "/settings", label: "Administration", d: ICONS.admin },
   ] },
   { section: "Tools", requires: "act", items: [

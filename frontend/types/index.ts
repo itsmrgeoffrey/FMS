@@ -158,6 +158,7 @@ export interface Customer {
 }
 
 export interface RulesConfig {
+  revision: string;
   regulatory_thresholds: {
     ctr_by_currency: Record<string, number>;
     sar_ratio_of_ctr: number;
@@ -175,6 +176,21 @@ export interface RulesConfig {
     note: string;
     items: { priority: string; coverage: "direct" | "partial" | "screening"; how: string }[];
   };
+}
+
+export interface OperatingProfile {
+  regulatory_jurisdiction: string;
+  institution_type: "bank" | "credit_union" | "msb" | "fintech" | "other";
+  business_timezone: string;
+}
+
+export interface InstallationInfo {
+  profile: OperatingProfile;
+  revision: string;
+  reporting_scope: string;
+  checks: { key: string; label: string; state: "configured" | "attention" | "unverified"; detail: string; href: string }[];
+  capabilities: string[];
+  boundaries: string[];
 }
 
 export interface RuleChangeEntry {

@@ -1,8 +1,10 @@
 # FMS — Fraud Monitoring System
 
-**Open-source, real-time transaction monitoring and BSA/AML reporting for the institutions that can't afford enterprise compliance suites.**
+**Open-source transaction monitoring and human review for institutions underserved by enterprise compliance suites.**
 
-Community banks, credit unions, money services businesses, and fintech startups carry the same Bank Secrecy Act obligations as the largest banks — Currency Transaction Reports, Suspicious Activity Reports, structuring detection — but rarely have the budget for six-figure AML platforms. FMS is a self-hostable system that watches a transaction database in real time, scores each transaction against a transparent risk engine, and produces the CTR and SAR filing lists a compliance officer needs. It is built to US FinCEN / BSA standards and runs on hardware you already have.
+FMS is intended as a practical, self-hosted review tool for smaller institutions: one shared transaction-processing path, explainable signals, tunable behavioural benchmarks, and a manageable human-review queue. It is not an enterprise compliance suite or a certified US compliance system. Automatic reporting assessment is limited to the documented US-bank/USD scope; other institution types and jurisdictions require manual reporting assessment. Deployment still requires institution-specific validation, secure operations, and qualified oversight.
+
+Start with [Small-Institution Setup](docs/SMALL_INSTITUTION_SETUP.md), the Installation screen, and [Current Scope](docs/CURRENT_SCOPE.md).
 
 > **Not legal or compliance advice.** FMS is a decision-support tool. It flags activity and prepares filing lists; it does **not** file reports and does **not** replace a qualified BSA/AML officer's judgment. All filings remain the institution's responsibility. See [COMPLIANCE.md](COMPLIANCE.md).
 
@@ -117,7 +119,7 @@ On first run FMS records a checkpoint and begins monitoring transactions created
 - **`bank_config.yaml`** — selects the ingestion mode (`monitoring.mode`). In **API-push** mode (the default, recommended) you don't need this file at all — transactions arrive via `POST /ingest/transactions` and no database block is required. In **database-poll** mode it holds the read-only DB connection and a column mapping from your schema to FMS's normalized fields (MySQL / SQL Server / PostgreSQL / Oracle). Copy [`bank_config.example.yaml`](bank_config.example.yaml), which documents both modes. It is git-ignored so real credentials never get committed.
 - **`.env`** — `GROQ_API_KEY` (case summaries), optional `GMAIL_USER` / `GMAIL_APP_PASSWORD` / `ALERT_EMAIL` (alerts), and optional `FMS_API_KEY` (API auth).
 
-Behavioral currency benchmarks live in `backend/services/analyzer.py`; they are not foreign reporting laws. See [Current Scope](docs/CURRENT_SCOPE.md) for cash classification, reporting limits, exact-money snapshots, recovery, single-worker deployment, and verification. See [Roadmap](ROADMAP.md) for explicitly deferred features.
+Behavioural currency benchmarks and detection windows are editable in Rule Engine; they are not foreign reporting laws. Changes require a reason and a server-run replay, or an explicit initial-configuration acknowledgement when no replay history exists. Two active administrators enable second-person approval. Saved rules are restored from the application database at startup. See [Current Scope](docs/CURRENT_SCOPE.md) for reporting and deployment limits, and [Roadmap](ROADMAP.md) for deferred features.
 
 ## Security
 

@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,7 @@ from backend.database import get_db
 from backend.models import User
 from backend.routers import audit
 from backend.services import dual_control, poller
+from backend.services.installation import OperatingProfile
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ _ENV_PATH = Path(os.getenv("FMS_ENV_FILE", "").strip() or (ROOT / ".env"))
 MAPPABLE_FIELDS = [
     "id", "account_id", "amount", "timestamp", "counterparty_account",
     "counterparty_name", "channel", "currency", "reference", "status", "batch_id",
+    "account_holder_name", "is_cash", "business_date",
 ]
 
 
@@ -115,7 +117,12 @@ class SettingsUpdate(BaseModel):
     tables: dict | None = None             # full tables mapping as edited
     rules: dict | None = None              # detection-rule overrides (live-applied)
     rules_rationale: str | None = None     # documented reason for the rule change (tuning log)
-    rules_backtest: dict | None = None     # backtest summary the admin ran before saving
+    rules_backtest: dict | None = None     # legacy client field; never trusted as evidence
+    rules_base_version: str | None = None
+    rules_allow_empty_history: bool = False
+    operating_profile: OperatingProfile | None = None
+    configuration_revision: str | None = None
+    profile_rationale: str | None = None
     integrations: IntegrationsSettings | None = None
     directory: DirectorySettings | None = None
     monitoring: MonitoringSettings | None = None
@@ -292,9 +299,23 @@ async def system_info(user: User = Depends(require_admin)):
     }
 
 
+@router.get("/installation")
+async def get_installation(db: AsyncSession = Depends(get_db)):
+    from backend.services.installation import inspect
+    return await inspect(db)
+
+
 @dual_control.register("SETTINGS_UPDATE")
 async def _exec_settings_update(db: AsyncSession, payload: dict, actor: str, request: Request | None) -> dict:
     body = SettingsUpdate(**payload)
+    if body.operating_profile is not None:
+        from backend.services.rule_governance import apply_profile
+        return await apply_profile(db, body.operating_profile.model_dump(), body.profile_rationale,
+                                   body.configuration_revision, actor)
+    if body.rules is not None:
+        from backend.services.rule_governance import apply_change
+        return await apply_change(db, body.rules, body.rules_rationale, body.rules_base_version,
+                                  actor, body.rules_allow_empty_history)
     return await _apply_settings(body, actor, request)
 
 
@@ -308,12 +329,27 @@ async def update_settings(
     """Configuration changes are dual-controlled: with two or more active admins,
     a save is queued until a second admin approves it (see dual_control.py)."""
     sections = [k for k in ("database", "tables", "rules", "monitoring", "institution",
-                            "alerts", "llm", "security", "integrations", "directory")
+                            "alerts", "llm", "security", "integrations", "directory", "operating_profile")
                 if getattr(body, k) is not None]
     if not sections:
         return {"saved": False, "restart_required": False}
+    if body.operating_profile is not None:
+        from backend.services.rule_governance import revision
+        if sections != ["operating_profile"]:
+            raise HTTPException(422, "Save the operating profile separately from other settings.")
+        if not (body.profile_rationale or "").strip():
+            raise HTTPException(422, "A reason for the profile change is required.")
+        if body.configuration_revision != revision():
+            raise HTTPException(409, "Configuration changed. Reload the installation profile.")
     if body.rules is not None:
         from backend.services import analyzer
+        from backend.services.rule_governance import revision
+        if sections != ["rules"]:
+            raise HTTPException(422, "Save detection rules separately from other settings.")
+        if not (body.rules_rationale or "").strip():
+            raise HTTPException(422, "A reason for the rule change is required.")
+        if body.rules_base_version != revision():
+            raise HTTPException(409, "Rules changed or no revision was supplied. Reload the rule settings.")
         try:
             analyzer.validate_rule_overrides(body.rules)
         except (TypeError, ValueError) as exc:
@@ -328,6 +364,8 @@ async def update_settings(
 
 
 async def _apply_settings(body: SettingsUpdate, actor: str, request: Request | None) -> dict:
+    if body.rules is not None:
+        raise HTTPException(422, "Detection rules must use the versioned rule-change path.")
     restart_required = False
     data = _read_yaml()
 
@@ -349,37 +387,6 @@ async def _apply_settings(body: SettingsUpdate, actor: str, request: Request | N
     if body.tables is not None:
         data["tables"] = body.tables
         restart_required = True
-
-    if body.rules is not None:
-        existing_rules = data.setdefault("rules", {})
-        existing_rules.update(body.rules)
-        # Applies live — the engine reads these at call time. Every change is
-        # recorded in the tuning log (rule_changes) with before/after values and
-        # the documented rationale — the FFIEC's "documented and periodically
-        # reviewed" evidence.
-        from backend.services import analyzer
-        before = analyzer.snapshot_rules()
-        try:
-            analyzer.apply_rule_overrides(existing_rules)
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(422, str(exc)) from exc
-        after = analyzer.snapshot_rules()
-        bank_config["rules"] = dict(existing_rules)
-        if before != after:
-            try:
-                from backend.database import SessionLocal
-                from backend.models import RuleChange
-                async with SessionLocal() as _db:
-                    _db.add(RuleChange(
-                        changed_by=actor,
-                        old_values=before,
-                        new_values=after,
-                        rationale=(body.rules_rationale or "").strip() or None,
-                        backtest=body.rules_backtest,
-                    ))
-                    await _db.commit()
-            except Exception:
-                log.exception("Failed to write rule tuning-log entry")
 
     if body.monitoring is not None:
         mon = data.setdefault("monitoring", {})

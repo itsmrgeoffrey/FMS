@@ -63,7 +63,11 @@ Returns the verdict **synchronously**: risk score/level, the named signals that 
 | `POST /rules/backtest` | admin | Replay stored history under proposed parameters — current vs. proposed flagged/SAR/CTR counts + changed examples; engine restored untouched |
 | `GET /rules/changes` | viewer+ | The tuning log: every change with before/after values, actor, rationale, attached backtest evidence |
 
-Rule changes are saved via `PUT /settings` (`rules`, `rules_rationale`, `rules_backtest`) and apply live.
+Rule changes use `PUT /settings` with `rules`, a nonblank `rules_rationale`, and `rules_base_version` from `GET /rules`'s `revision`. Stale or missing revisions return 409. Unknown rule keys or invalid values return 422. Save rules separately from other settings. The server reruns the replay at application time and persists the full resulting rule snapshot and evidence before changing live values; the legacy client `rules_backtest` field is ignored. With no replay history, `rules_allow_empty_history: true` explicitly acknowledges initial configuration without historical validation.
+
+With two active administrators, changes return `pending: true` and do not apply until another administrator approves. Versions are rechecked and replay is rerun at approval time. Stale proposals must be cancelled and resubmitted. A successful rule update applies to future processing; it does not reclassify historical cases.
+
+`GET /settings/installation` (admin) returns the current operating profile, shared configuration revision, installation checks, reporting scope, and operating limits. To confirm or update the profile, submit only `operating_profile` (`regulatory_jurisdiction`, `institution_type`, `business_timezone`), `configuration_revision`, and nonblank `profile_rationale` to `PUT /settings`. Institution types: `bank`, `credit_union`, `msb`, `fintech`, `other`. Timezones must be valid IANA names. Profile changes use the same approval and stale-version protections; they invalidate previously loaded rule proposals.
 
 ## Risk assessment
 

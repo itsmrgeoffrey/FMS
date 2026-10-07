@@ -1,6 +1,6 @@
 import type {
   CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig, AnalyticsKpis,
-  BacktestResult, RuleChangeEntry, Scan314aResult, RiskAssessment, RiskAssessmentList,
+  BacktestResult, RuleChangeEntry, Scan314aResult, RiskAssessment, RiskAssessmentList, InstallationInfo,
 } from "@/types";
 
 const BASE = "/api";
@@ -146,6 +146,7 @@ export const api = {
     req(`/customers?limit=${limit}`),
 
   getRules: (): Promise<RulesConfig> => req<RulesConfig>("/rules"),
+  getInstallation: (): Promise<InstallationInfo> => req<InstallationInfo>("/settings/installation"),
 
   getAnalyticsKpis: (): Promise<AnalyticsKpis> => req<AnalyticsKpis>("/analytics"),
 
