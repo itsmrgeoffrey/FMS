@@ -44,8 +44,14 @@ class NormalizedTransaction:
     source_table: str       # which config table key this came from
     batch_id: str | None = None   # optional — set when bank table has a batch/payment-run ID column
     account_holder_name: str | None = None
+    account_holder_id: str | None = None
     is_cash: bool | None = None
     business_date: str | None = None
+    transaction_instrument: str | None = None
+    branch_id: str | None = None
+    location_id: str | None = None
+    conductor_id: str | None = None
+    conductor_name: str | None = None
 
     def __post_init__(self):
         self.amount = Decimal(str(self.amount))
@@ -53,6 +59,13 @@ class NormalizedTransaction:
             raise ValueError("amount must be a finite positive decimal")
         self.timestamp = utc_naive(self.timestamp)
         self.currency = self.currency.strip().upper()
+        for field in (
+            "account_holder_id", "transaction_instrument", "branch_id",
+            "location_id", "conductor_id", "conductor_name",
+        ):
+            value = getattr(self, field)
+            if value is not None:
+                setattr(self, field, str(value).strip() or None)
         if self.is_cash is not None:
             if str(self.is_cash).lower() not in ("true", "false", "0", "1"):
                 raise ValueError("is_cash must be an explicit boolean")

@@ -73,6 +73,18 @@ export interface Assessment {
   screening_status?: string;
   regulatory_status?: string;
   reporting_status?: string;
+  structuring_alert?: boolean;
+  cash_classification?: boolean | null;
+  business_date?: string;
+  transaction_context?: {
+    account_holder_id?: string | null;
+    account_holder_name?: string | null;
+    transaction_instrument?: string | null;
+    branch_id?: string | null;
+    location_id?: string | null;
+    conductor_id?: string | null;
+    conductor_name?: string | null;
+  };
   screening_matches?: { party: string; query: string; matched_name: string; source: string; list_type: string; score: number }[];
 }
 

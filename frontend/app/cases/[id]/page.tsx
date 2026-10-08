@@ -43,6 +43,7 @@ function CaseDetail({ id }: { id: string }) {
   }
   const legacy = !caseData?.assessment || caseData.assessment.version === "legacy";
   const assessment = caseData?.assessment;
+  const context = assessment?.transaction_context;
 
   return <div className="review-page">
     <Link href="/alerts" className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:underline"><ArrowLeft size={16} />Alerts</Link>
@@ -68,12 +69,16 @@ function CaseDetail({ id }: { id: string }) {
         <div className="min-w-0">
           <section className="review-section"><h2 className="mb-5">Transaction details</h2>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Account" value={caseData.account_id} /><Field label="Counterparty account" value={caseData.counterparty_account} /><Field label="Counterparty name" value={caseData.counterparty_name} />
+              <Field label="Account" value={caseData.account_id} /><Field label={caseData.direction === "OUTWARD" ? "Beneficiary account" : "Sender account"} value={caseData.counterparty_account} /><Field label={caseData.direction === "OUTWARD" ? "Beneficiary name" : "Sender name"} value={caseData.counterparty_name} />
               <Field label="Source" value={caseData.source_table} /><Field label="Source transaction ID" value={caseData.source_txn_id} /><Field label="Channel" value={caseData.channel} />
               <Field label="Transaction time (local)" value={date(caseData.timestamp)} /><Field label="Created (local)" value={date(caseData.created_at)} /><Field label="Reference" value={caseData.reference} />
+              <Field label="Instrument" value={context?.transaction_instrument ? words(context.transaction_instrument) : null} /><Field label="Business date" value={assessment?.business_date} /><Field label="Cash classification" value={assessment?.cash_classification == null ? null : assessment.cash_classification ? "Cash" : "Non-cash"} />
+              <Field label="Branch" value={context?.branch_id} /><Field label="Location" value={context?.location_id} /><Field label="Account holder ID" value={context?.account_holder_id} />
+              <Field label="Account holder" value={context?.account_holder_name} /><Field label="Conductor ID" value={context?.conductor_id} /><Field label="Conductor" value={context?.conductor_name} />
             </dl>
           </section>
           <section className="review-section"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2>Detection evidence</h2><ConfidenceBadge confidence={caseData.confidence} /></div>
+            {assessment?.structuring_alert && <div className="mb-5 border-l-4 border-red-500 bg-red-50 p-4"><h3 className="font-semibold text-red-900">Cross-branch structuring alert</h3><p className="mt-1 text-sm text-red-800">Multiple individually sub-threshold cash transactions were identified across distinct branches or locations on the same business day.</p></div>}
             <div className="mb-5"><RiskScoreGauge score={caseData.risk_score} /></div>
             {caseData.fraud_type && <p className="mb-4 text-sm font-medium text-gray-700">{words(caseData.fraud_type)}</p>}
             {caseData.reasons.length || caseData.ai_summary ? <AiReasons reasons={caseData.reasons} summary={caseData.ai_summary} /> : <p className="text-sm text-gray-500">No detection evidence recorded.</p>}

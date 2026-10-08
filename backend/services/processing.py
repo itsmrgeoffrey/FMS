@@ -42,17 +42,27 @@ def from_row(row):
         currency=row.currency, reference=row.reference, status=None,
         source_table=getattr(row, "source_table", "api"),
         account_holder_name=getattr(row, "account_holder_name", None),
+        account_holder_id=getattr(row, "account_holder_id", None),
+        is_cash=getattr(row, "is_cash", None),
+        business_date=getattr(row, "business_date", None),
+        transaction_instrument=getattr(row, "transaction_instrument", None),
+        branch_id=getattr(row, "branch_id", None),
+        location_id=getattr(row, "location_id", None),
+        conductor_id=getattr(row, "conductor_id", None),
+        conductor_name=getattr(row, "conductor_name", None),
     )
 
 
 def verdict(case, assessment=None, duplicate=False):
+    assessment = assessment or {"version": "legacy", "regulatory_status": "REASSESSMENT_REQUIRED"}
     return {"case_id": case.id, "duplicate": duplicate, "processing_status": "COMPLETED",
             "flagged": case.status != "CLEAN" or case.ctr_required or case.sar_recommended or case.sanctions_hit,
             "review_status": case.status,
             "risk_score": case.risk_score, "confidence": case.confidence,
             "fraud_type": case.fraud_type, "sanctions_hit": case.sanctions_hit,
             "ctr_required": case.ctr_required, "sar_recommended": case.sar_recommended,
-            "reasons": case.reasons, "assessment": assessment or {"version": "legacy", "regulatory_status": "REASSESSMENT_REQUIRED"}}
+            "structuring_alert": bool(assessment.get("structuring_alert")),
+            "reasons": case.reasons, "assessment": assessment}
 
 
 @asynccontextmanager
@@ -75,7 +85,10 @@ async def process(txn, supplied_history=(), timestamp_supplied=True):
             if record:
                 if not timestamp_supplied:
                     txn.timestamp = datetime.fromisoformat(record.payload["timestamp"])
-                if serialize(txn) != record.payload:
+                # Canonicalizing the stored snapshot fills optional fields added
+                # in later releases, so an unchanged pre-upgrade retry remains
+                # idempotent instead of becoming a false payload conflict.
+                if serialize(txn) != serialize(deserialize(record.payload)):
                     raise HTTPException(409, "Transaction ID already belongs to a different payload")
             elif existing:
                 previous = from_row(existing)
@@ -139,6 +152,16 @@ async def process(txn, supplied_history=(), timestamp_supplied=True):
                 "reporting_status": "NOT_FILED" if result.ctr_required or result.sar_recommended else "NOT_ASSESSED",
                 "rules": result.assessed_rules, "cash_classification": txn.is_cash,
                 "business_date": analyzer.business_day(txn),
+                "structuring_alert": result.structuring_alert,
+                "transaction_context": {
+                    "account_holder_id": txn.account_holder_id,
+                    "account_holder_name": txn.account_holder_name,
+                    "transaction_instrument": txn.transaction_instrument,
+                    "branch_id": txn.branch_id,
+                    "location_id": txn.location_id,
+                    "conductor_id": txn.conductor_id,
+                    "conductor_name": txn.conductor_name,
+                },
                 "late_arrival": later,
             }
             case = FraudCase(source_table=txn.source_table, source_txn_id=txn.id,

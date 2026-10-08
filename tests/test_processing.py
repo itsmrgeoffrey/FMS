@@ -53,6 +53,40 @@ def test_cash_boundary_and_no_ctr_for_wire():
     assert A.evaluate(txn(is_cash=None), [])["ctr"].trigger == "MANUAL_REVIEW"
 
 
+def test_pre_upgrade_processing_payloads_canonicalize_new_optional_fields():
+    old_payload = P.serialize(txn())
+    for field in ("account_holder_id", "transaction_instrument", "branch_id",
+                  "location_id", "conductor_id", "conductor_name"):
+        old_payload.pop(field)
+
+    restored = P.serialize(P.deserialize(old_payload))
+    assert all(restored[field] is None for field in (
+        "account_holder_id", "transaction_instrument", "branch_id",
+        "location_id", "conductor_id", "conductor_name",
+    ))
+
+
+def test_processing_preserves_context_and_returns_structuring_alert(store):
+    async def run():
+        await P.process(txn(id="branch-1", amount="6000", branch_id="BR-001",
+            location_id="NORTH", business_date="2026-10-06",
+            transaction_instrument="CASH_DEPOSIT", account_holder_id="CUSTOMER-1",
+            conductor_id="PERSON-1"))
+        result = await P.process(txn(id="branch-2", amount="4000", branch_id="BR-002",
+            location_id="SOUTH", business_date="2026-10-06",
+            timestamp=NOW + timedelta(hours=1), transaction_instrument="CASH_DEPOSIT",
+            account_holder_id="CUSTOMER-1", conductor_id="PERSON-1"))
+
+        assert result["structuring_alert"]
+        assert result["fraud_type"] == "cross-branch cash structuring"
+        assert result["assessment"]["structuring_alert"]
+        assert result["assessment"]["transaction_context"]["branch_id"] == "BR-002"
+        assert result["assessment"]["transaction_context"]["conductor_id"] == "PERSON-1"
+        assert not result["ctr_required"]
+
+    asyncio.run(run())
+
+
 @pytest.fixture
 def configuration_store(store, monkeypatch):
     from backend.services import installation, rule_governance
@@ -376,7 +410,10 @@ def test_api_routing_pagination_assessments_and_logout(store, monkeypatch):
                 headers={"Authorization": f"Bearer {token}"}) as client:
             body = dict(external_id="api-1", account_id="ACCOUNT-ONE", amount="10000.01",
                 direction="INWARD", currency="USD", channel="ANY-CHANNEL", is_cash=True,
-                account_holder_name="Customer", counterparty_name="Vendor")
+                account_holder_name="Customer", account_holder_id="CUSTOMER-1",
+                counterparty_name="Vendor", transaction_instrument="CASH_DEPOSIT",
+                branch_id="BR-001", location_id="CITY-CENTRE", conductor_id="PERSON-1",
+                conductor_name="Cash Presenter", business_date="2026-10-06")
             pushed = await client.post("/ingest/transactions", json=body, headers={"X-API-Key": "test-key"})
             assert pushed.status_code == 200, pushed.text
             assert pushed.json()["ctr_required"]
@@ -391,6 +428,8 @@ def test_api_routing_pagination_assessments_and_logout(store, monkeypatch):
             detail = await client.get(f"/cases/{second.json()['case_id']}")
             assert detail.status_code == 200 and detail.json()["account_id"] == "ACCOUNT-TWO"
             assert detail.json()["assessment"]["cash_classification"] is False
+            assert detail.json()["assessment"]["transaction_context"]["transaction_instrument"] == "CASH_DEPOSIT"
+            assert detail.json()["assessment"]["transaction_context"]["account_holder_id"] == "CUSTOMER-1"
             assert datetime.fromisoformat(detail.json()["timestamp"]).tzinfo == timezone.utc
             assert datetime.fromisoformat(detail.json()["created_at"]).tzinfo == timezone.utc
             for amount in ("NaN", "-1", "0", "1.1234567"):
@@ -422,9 +461,12 @@ def test_api_routing_pagination_assessments_and_logout(store, monkeypatch):
             assert (await client.get("/cases", params={"search": "ACCOUNT-TWO"})).json()["total"] == 1
             assert (await client.get("/cases", params={"search": "legacy", "min_risk": 76})).json()["total"] == 1
             assert (await client.get("/cases", params={"status": "ESCALATED", "flag": "ctr"})).json()["total"] == 1
+            assert (await client.get("/cases", params={"flag": "structuring"})).status_code == 200
+            assert (await client.get("/cases", params={"direction": "INWARD"})).json()["total"] == 3
+            assert (await client.get("/cases", params={"direction": "OUTWARD"})).json()["total"] == 0
             for term in ("%", "_", "not-present"):
                 assert (await client.get("/cases", params={"search": term})).json()["total"] == 0
-            for params in ({"flag": "invalid"}, {"min_risk": 101}, {"min_risk": -1}, {"search": "x" * 201}):
+            for params in ({"flag": "invalid"}, {"direction": "SIDEWAYS"}, {"min_risk": 101}, {"min_risk": -1}, {"search": "x" * 201}):
                 assert (await client.get("/cases", params=params)).status_code == 422
             overview = (await client.get("/stats/dashboard")).json()
             legacy_attention = next(item for item in overview["attention"] if item["id"] == legacy.id)
@@ -524,6 +566,72 @@ def test_poller_initializes_once_and_preserves_first_arrivals(store, monkeypatch
             record = (await db.execute(select(TransactionProcessing))).scalar_one()
             assert record.state == "COMPLETED" and record.source_txn_id == "101"
     asyncio.run(run())
+
+
+def test_poller_merges_history_from_separate_inward_and_outward_sources(monkeypatch):
+    from backend.services import poller
+    captured = []
+    checkpoints = []
+
+    class Adapter:
+        def __init__(self, source, current=False):
+            self.source = source
+            self.current = current
+            self.history_calls = []
+        async def fetch_new_transactions(self, table, since):
+            return [txn(id="new-1", source_table="outward", account_id="MERGED-A")] if self.current else []
+        async def fetch_account_history(self, account, tables, days):
+            self.history_calls.append((account, tables, days))
+            return [txn(id=f"old-{self.source}", source_table=self.source, account_id=account)]
+
+    inward = Adapter("inward")
+    outward = Adapter("outward", current=True)
+    monkeypatch.setattr(poller, "_load_checkpoint", lambda table: asyncio.sleep(0, result="0"))
+    monkeypatch.setattr(poller, "_save_checkpoint", lambda table, identifier: asyncio.sleep(0, result=checkpoints.append((table, identifier))))
+    monkeypatch.setattr(poller.processing, "process", lambda current, history: asyncio.sleep(0, result=captured.append((current, history))))
+
+    asyncio.run(poller._process_table(outward, "outward", 90, {"inward": inward, "outward": outward}))
+
+    assert checkpoints == [("outward", "new-1")]
+    assert {item.source_table for item in captured[0][1]} == {"inward", "outward"}
+    assert inward.history_calls == [("MERGED-A", ["inward"], 90)]
+    assert outward.history_calls == [("MERGED-A", ["outward"], 90)]
+
+
+def test_source_database_overrides_and_secret_helpers(monkeypatch):
+    from backend.routers import settings as settings_routes
+    from backend.services import poller
+    shared = {"type": "mysql", "host": "shared", "password": "shared-secret"}
+    separate = {"type": "postgres", "host": "inward", "password": "source-secret"}
+    monkeypatch.setitem(poller.bank_config, "database", shared)
+    monkeypatch.setitem(poller.bank_config, "tables", {
+        "inward": {"database": separate, "table_name": "credits"},
+        "outward": {"table_name": "debits"},
+    })
+
+    assert poller.source_database("inward") is separate
+    assert poller.source_database("outward") is shared
+    assert "password" not in settings_routes._public_database(separate)
+    assert settings_routes._public_database(separate)["password_set"]
+    assert settings_routes._merge_database(separate, {"type": "postgres", "password": ""})["password"] == "source-secret"
+
+    public = asyncio.run(settings_routes.get_settings())
+    assert public["tables"]["inward"]["database"]["password_set"]
+    assert "password" not in public["tables"]["inward"]["database"]
+
+    created = []
+    class FakeAdapter:
+        def __init__(self, db_config, tables_config):
+            self.db_config = db_config
+            self.tables_config = tables_config
+            created.append(self)
+    monkeypatch.setattr(poller, "_adapters", {})
+    monkeypatch.setattr(poller, "_adapter_type", lambda db_type: FakeAdapter)
+    adapters = poller.get_adapters()
+    assert adapters["inward"] is not adapters["outward"]
+    assert adapters["inward"].tables_config.keys() == {"inward"}
+    assert adapters["outward"].tables_config.keys() == {"outward"}
+    assert len(created) == 2
 
 
 def test_onboarding_reports_saved_cursors_without_contacting_source(store, monkeypatch):

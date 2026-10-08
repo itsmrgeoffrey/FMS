@@ -159,8 +159,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  testConnection: (): Promise<{ connected: boolean; message: string; db_type?: string }> =>
-    req("/settings/test-connection", { method: "POST" }),
+  testConnection: (source = "shared"): Promise<{ connected: boolean; message: string; db_type?: string; source?: string }> =>
+    req(`/settings/test-connection?source=${encodeURIComponent(source)}`, { method: "POST" }),
 
   testDirectory: (): Promise<{ connected: boolean; message: string; enabled: boolean }> =>
     req("/settings/test-directory", { method: "POST" }),

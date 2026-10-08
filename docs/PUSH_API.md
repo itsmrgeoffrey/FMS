@@ -10,6 +10,8 @@ Send amounts as decimal strings for exact input (positive, at most 24 digits and
 
 Provide `is_cash` as `true` or `false`. Missing classification requires manual reporting assessment. Optional `business_date` is an ISO date from the source banking system; otherwise the configured business timezone is used. The US-bank USD cash rule is strictly above $10,000, not every large transfer. Other regulatory scopes are manual.
 
+For branch cash monitoring, also provide `transaction_instrument`, `branch_id` or `location_id`, and the available conductor and account-holder identifiers. FMS raises a distinct structuring alert when the same account has at least two individually sub-threshold cash transactions in the same direction and currency, across distinct branches or locations on one business day, whose aggregate reaches the configured benchmark. That suspicious-pattern alert is separate from CTR applicability.
+
 Responses now include `processing_status`, `review_status`, and `assessment` with separate detection, screening, regulatory, and reporting fields. A flagged transaction requires review; it is not a funds-transfer rejection or confirmed fraud. Legacy `ctr_required` and `sanctions_hit` names remain compatible but mean CTR applicability review and possible SDN name match respectively. Exports are drafts, not completed filings. See [Current Scope](CURRENT_SCOPE.md).
 
 Admins can inspect `GET /ingest/processing` and retry API records with `POST /ingest/processing/{record_id}/retry`. Polled records retry through the poller with bank history. Notifications are at-least-once; deduplicate callback `delivery_id`.
@@ -57,12 +59,20 @@ X-API-Key: <your key>
 | `amount` | decimal string or number (> 0) | ✔ | Decimal strings preserve exact input. |
 | `direction` | string | ✔ | `INWARD` or `OUTWARD`. |
 | `timestamp` | string (ISO 8601) | — | Defaults to server time (UTC) if omitted. |
-| `counterparty_account` | string (≤64) | — | Used for counterparty pattern detection. |
-| `counterparty_name` | string (≤200) | — | Screened against the OFAC lists. |
+| `counterparty_account` | string (≤64) | — | API-compatible field for the beneficiary account on outward transactions or sender account on inward transactions. |
+| `counterparty_name` | string (≤200) | — | API-compatible field for the beneficiary/sender name; screened against the OFAC lists. |
 | `channel` | string (≤40) | — | e.g. `wire`, `ach`, `card`, `transfer`. |
 | `currency` | three-letter string | — | Defaults to `USD`. |
 | `reference` | string (≤255) | — | Free-text reference / memo. |
 | `account_holder_name` | string (≤200) | — | If provided, screened against the OFAC SDN + consolidated lists. |
+| `account_holder_id` | string (≤64) | — | Stable customer/member identifier retained with the assessment. |
+| `is_cash` | boolean or null | — | `true` for cash, `false` for non-cash; missing/null requires manual classification. |
+| `business_date` | ISO date | — | Source banking date used for same-day aggregation. |
+| `transaction_instrument` | string (≤40) | — | e.g. `CASH_DEPOSIT`, `CASH_WITHDRAWAL`, `WIRE`, `ACH`, `CHECK`, `CARD`. |
+| `branch_id` | string (≤64) | — | Branch that accepted or paid the transaction. |
+| `location_id` | string (≤64) | — | Location identifier when a branch ID is unavailable or additional location detail is needed. |
+| `conductor_id` | string (≤64) | — | Identifier for the person conducting the transaction. |
+| `conductor_name` | string (≤200) | — | Name of the person conducting the transaction. |
 
 ### Response — `200 OK`
 
@@ -77,9 +87,10 @@ X-API-Key: <your key>
   "sanctions_hit": false,
   "ctr_required": false,
   "sar_recommended": true,
+  "structuring_alert": false,
   "reasons": [
     "3 outward transfers just under the $10,000 CTR threshold within 24h — classic structuring.",
-    "Aggregate to a single counterparty exceeds the reporting threshold."
+    "Aggregate to a single beneficiary exceeds the reporting threshold."
   ]
 }
 ```
@@ -95,6 +106,7 @@ X-API-Key: <your key>
 | `sanctions_hit` | `true` if an OFAC match was found. |
 | `ctr_required` | `true` if the transaction triggers a Currency Transaction Report threshold. |
 | `sar_recommended` | `true` if a Suspicious Activity Report is recommended. |
+| `structuring_alert` | `true` when the explicit cross-branch/location cash-splitting rule fired. |
 | `reasons` | Every rule that fired, in plain language — the full explainability trail. |
 
 Every response also carries an **`X-Request-ID`** header so you can correlate it with your own logs.
@@ -104,7 +116,7 @@ Every response also carries an **`X-Request-ID`** header so you can correlate it
 - **Synchronous** — the verdict comes back in the POST response. Detect-at-the-moment, not batch.
 - **Idempotent** — posting the same `external_id` again returns the original verdict (`duplicate: true`); it never opens a second case.
 - **Deterministic & explainable** — the same input always yields the same score, and `reasons` states exactly which rules fired. Nothing is a black box.
-- **Sanctions screening** — `account_holder_name` and `counterparty_name` are screened against the OFAC SDN / consolidated lists; a hit forces a high-confidence sanctions verdict with instructions to block or reject.
+- **Sanctions screening** — `account_holder_name` and the beneficiary/sender value in `counterparty_name` are screened against the OFAC SDN / consolidated lists; a hit forces a high-confidence sanctions verdict with instructions to block or reject.
 
 ### Errors
 

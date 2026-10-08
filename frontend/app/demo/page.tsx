@@ -6,7 +6,24 @@ import Link from "next/link";
 type Direction = "OUTWARD" | "INWARD";
 type Stage = "home" | "transfer" | "confirm" | "processing" | "success" | "error";
 
-const CHANNELS = ["MOBILE", "WEB", "USSD", "ATM", "POS"];
+const CHANNELS = ["BRANCH", "TELLER", "ATM", "CASH_DEPOSIT_MACHINE", "MOBILE", "WEB", "USSD", "POS", "API"];
+const INSTRUMENTS = [
+  ["CASH_DEPOSIT", "Cash deposit"],
+  ["CASH_WITHDRAWAL", "Cash withdrawal"],
+  ["WIRE", "Wire transfer"],
+  ["ACH", "ACH"],
+  ["CHECK", "Check"],
+  ["CARD", "Card"],
+  ["MONEY_ORDER", "Money order"],
+  ["OTHER", "Other"],
+] as const;
+
+function today() {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
 
 interface RecentTxn {
   id: string;
@@ -40,10 +57,11 @@ export default function DemoPage() {
   const [acctError, setAcctError] = useState("");
   const [recentTxns, setRecentTxns] = useState<RecentTxn[]>([]);
   const [lastReference, setLastReference] = useState("");
-  const [verdict, setVerdict] = useState<{ case_id: string; flagged: boolean; risk_score: number; ctr_required: boolean; sar_recommended: boolean; reasons: string[] } | null>(null);
+  const [verdict, setVerdict] = useState<{ case_id: string; flagged: boolean; risk_score: number; ctr_required: boolean; sar_recommended: boolean; structuring_alert: boolean; reasons: string[] } | null>(null);
 
   const [form, setForm] = useState({
     account_id: "",
+    account_holder_id: "",
     account_holder_name: "",
     amount: "",
     currency: "USD",
@@ -54,6 +72,12 @@ export default function DemoPage() {
     channel: "MOBILE",
     narration: "",
     cash_kind: "NON_CASH",
+    transaction_instrument: "WIRE",
+    business_date: today(),
+    branch_id: "",
+    location_id: "",
+    conductor_id: "",
+    conductor_name: "",
   });
 
   useEffect(() => {
@@ -71,6 +95,17 @@ export default function DemoPage() {
 
   function set(field: string, value: string) {
     setForm(f => ({ ...f, [field]: value }));
+    setLastReference("");
+  }
+
+  function setInstrument(value: string) {
+    setForm(f => ({
+      ...f,
+      transaction_instrument: value,
+      cash_kind: value.startsWith("CASH_")
+        ? "CASH"
+        : f.transaction_instrument.startsWith("CASH_") ? "NON_CASH" : f.cash_kind,
+    }));
     setLastReference("");
   }
 
@@ -102,6 +137,9 @@ export default function DemoPage() {
     && parseFloat(form.amount) > 0
     && monitoredAccountReady
     && counterpartyReady
+    && Boolean(form.channel.trim())
+    && Boolean(form.transaction_instrument)
+    && Boolean(form.business_date)
     && !acctError;
 
   async function submit() {
@@ -123,7 +161,14 @@ export default function DemoPage() {
         counterparty_account: (direction === "OUTWARD" ? form.beneficiary_account : form.sender_account).trim(),
         counterparty_name: direction === "OUTWARD" ? form.beneficiary_name : form.sender_name,
         account_holder_name: form.account_holder_name || undefined,
-        is_cash: form.cash_kind === "CASH",
+        account_holder_id: form.account_holder_id.trim() || undefined,
+        is_cash: form.cash_kind === "UNKNOWN" ? null : form.cash_kind === "CASH",
+        business_date: form.business_date,
+        transaction_instrument: form.transaction_instrument,
+        branch_id: form.branch_id.trim() || undefined,
+        location_id: form.location_id.trim() || undefined,
+        conductor_id: form.conductor_id.trim() || undefined,
+        conductor_name: form.conductor_name.trim() || undefined,
       };
       const token = auth.token();
       const res = await fetch("/api/ingest/simulate", {
@@ -299,6 +344,17 @@ export default function DemoPage() {
                   />
                 </div>
                 <div className="mt-3">
+                  <label className="text-xs text-gray-400 mb-1 block">Account Holder ID</label>
+                  <input
+                    type="text"
+                    placeholder="Customer or member identifier"
+                    value={form.account_holder_id}
+                    onChange={e => set("account_holder_id", e.target.value)}
+                    maxLength={64}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                </div>
+                <div className="mt-3">
                   <label className="text-xs text-gray-400 mb-1 block">
                     {direction === "OUTWARD" ? "Source Name" : "Receiver Name"}
                   </label>
@@ -310,10 +366,11 @@ export default function DemoPage() {
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500"
                   />
                 </div>
-                <label className="text-xs text-gray-400 mt-3 block" htmlFor="cash-kind">Transaction type</label>
+                <label className="text-xs text-gray-400 mt-3 block" htmlFor="cash-kind">Cash classification</label>
                 <select id="cash-kind" value={form.cash_kind} onChange={e => set("cash_kind", e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                  <option value="NON_CASH">Electronic transfer</option>
-                  <option value="CASH">Cash transaction</option>
+                  <option value="NON_CASH">Non-cash</option>
+                  <option value="CASH">Cash</option>
+                  <option value="UNKNOWN">Unknown / manual review</option>
                 </select>
               </div>
 
@@ -327,7 +384,7 @@ export default function DemoPage() {
                       <label className="text-xs text-gray-400 mb-1 block">Account Number</label>
                       <input
                         type="text"
-                        placeholder="Counterparty identifier"
+                        placeholder="Beneficiary identifier"
                         value={form.beneficiary_account}
                         onChange={handleAcctChange}
                         onBlur={handleAcctBlur}
@@ -373,10 +430,46 @@ export default function DemoPage() {
               <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
                 <p className="text-gray-400 text-xs font-medium uppercase tracking-wide">Transaction Details</p>
                 <div>
+                  <label className="text-xs text-gray-400 mb-1 block" htmlFor="instrument">Instrument</label>
+                  <select id="instrument" value={form.transaction_instrument} onChange={e => setInstrument(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white">
+                    {INSTRUMENTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+                <div>
                   <label className="text-xs text-gray-400 mb-1 block">Channel</label>
                   <input list="channels" aria-label="Channel" maxLength={40} value={form.channel} onChange={e => set("channel", e.target.value)}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white" />
                   <datalist id="channels">{CHANNELS.map(c => <option key={c} value={c} />)}</datalist>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Business Date</label>
+                  <input type="date" value={form.business_date} onChange={e => set("business_date", e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">Branch ID</label>
+                    <input type="text" maxLength={64} placeholder="BR-001" value={form.branch_id} onChange={e => set("branch_id", e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">Location ID</label>
+                    <input type="text" maxLength={64} placeholder="LOC-001" value={form.location_id} onChange={e => set("location_id", e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">Conductor ID</label>
+                    <input type="text" maxLength={64} placeholder="ID or member no." value={form.conductor_id} onChange={e => set("conductor_id", e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">Conductor Name</label>
+                    <input type="text" maxLength={200} placeholder="Person presenting cash" value={form.conductor_name} onChange={e => set("conductor_name", e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500" />
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Narration (optional)</label>
@@ -423,9 +516,13 @@ export default function DemoPage() {
                 {[
                   { label: direction === "OUTWARD" ? "From" : "To", value: `${form.account_holder_name || "Source account"} · ${form.account_id}` },
                   { label: direction === "OUTWARD" ? "To" : "From", value: `${direction === "OUTWARD" ? form.beneficiary_name : form.sender_name} · ${direction === "OUTWARD" ? form.beneficiary_account : form.sender_account}` },
+                  { label: "Instrument", value: INSTRUMENTS.find(([value]) => value === form.transaction_instrument)?.[1] || form.transaction_instrument },
                   { label: "Channel", value: form.channel },
+                  { label: "Branch / location", value: form.branch_id || form.location_id || "Not provided" },
+                  { label: "Business date", value: form.business_date },
+                  { label: "Conductor", value: form.conductor_name || form.conductor_id || "Not provided" },
                   { label: "Narration", value: form.narration || "—" },
-                  { label: "Type", value: form.cash_kind === "CASH" ? "Cash" : "Electronic" },
+                  { label: "Cash classification", value: form.cash_kind === "CASH" ? "Cash" : form.cash_kind === "NON_CASH" ? "Non-cash" : "Unknown" },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between items-start">
                     <span className="text-gray-400 text-sm">{label}</span>
@@ -480,9 +577,9 @@ export default function DemoPage() {
                 </svg>
               </div>
               <div className="text-center">
-                <p className="text-gray-900 font-bold text-2xl">{verdict?.flagged ? "Review Required" : "Assessment Complete"}</p>
+                <p className="text-gray-900 font-bold text-2xl">{verdict?.structuring_alert ? "Structuring Alert" : verdict?.flagged ? "Review Required" : "Assessment Complete"}</p>
                 <p className="text-gray-400 text-sm mt-1">{fmtAmt(parseFloat(form.amount) || 0, form.currency)} assessed</p>
-                <p className="text-sm mt-2">Risk {verdict?.risk_score}/100{verdict?.ctr_required ? " · CTR review" : ""}{verdict?.sar_recommended ? " · SAR review" : ""}</p>
+                <p className="text-sm mt-2">Risk {verdict?.risk_score}/100{verdict?.structuring_alert ? " · Structuring" : ""}{verdict?.ctr_required ? " · CTR review" : ""}{verdict?.sar_recommended ? " · SAR review" : ""}</p>
                 {verdict && <Link href={`/cases/${verdict.case_id}`} className="text-blue-600 text-sm inline-block mt-3">View assessment</Link>}
               </div>
 

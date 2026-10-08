@@ -30,9 +30,10 @@ async def list_cases(
     confidence: str | None = Query(None),
     review_required: bool | None = Query(None),
     result: str | None = Query(None, pattern="^(flagged|clean)$"),
+    direction: str | None = Query(None, pattern="^(INWARD|OUTWARD)$"),
     sort: str = Query("recent", pattern="^(recent|risk)$"),
     search: str | None = Query(None, max_length=200),
-    flag: str | None = Query(None, pattern="^(ctr|sar|sanctions)$"),
+    flag: str | None = Query(None, pattern="^(ctr|sar|sanctions|structuring)$"),
     min_risk: int | None = Query(None, ge=0, le=100),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -45,6 +46,8 @@ async def list_cases(
         filters.append(open_condition())
     if result:
         filters.append(flagged_condition() if result == "flagged" else ~flagged_condition())
+    if direction:
+        filters.append(FraudCase.direction == direction)
     if status:
         filters.append(FraudCase.status == status)
     if confidence:
@@ -58,8 +61,13 @@ async def list_cases(
             FraudCase.reference, FraudCase.id,
         ))))
     if flag:
-        filters.append({"ctr": FraudCase.ctr_required, "sar": FraudCase.sar_recommended,
-                        "sanctions": FraudCase.sanctions_hit}[flag].is_(True))
+        flag_filter = {
+            "ctr": FraudCase.ctr_required.is_(True),
+            "sar": FraudCase.sar_recommended.is_(True),
+            "sanctions": FraudCase.sanctions_hit.is_(True),
+            "structuring": FraudCase.fraud_type == "cross-branch cash structuring",
+        }[flag]
+        filters.append(flag_filter)
     if min_risk is not None:
         filters.append(FraudCase.risk_score >= min_risk)
     if date_from:

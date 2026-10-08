@@ -14,6 +14,7 @@ Settings > Approvals contains pending requests, configuration comparisons, reaso
 - An empty source is initialized durably so its first arriving rows are processed, not skipped as a later baseline. This survives restart.
 - Existing checkpoints are unchanged. Do not delete or reset them as an import mechanism.
 - Source IDs must be unique, immutable and increasing in database sort order. Random UUIDs, lower-ID late inserts, reused IDs and updates to existing rows are not discovered reliably. Use an ordered upstream feed or API push for those sources.
+- Inward and outward mappings use the shared read-only database by default. If the institution stores them separately, enable a per-feed database connection under Settings > System > Table Mappings (or add a nested `database` block to that table in `bank_config.yaml`). FMS connects to every configured source before a poll and merges account history from the feeds before running the same detection engine. A failed source connection therefore pauses database-poll analysis rather than silently assessing incomplete history.
 - Account history is read from mapped source tables within the configured lookback relative to the current date. Analysis excludes other accounts, currencies and future transactions. Reading historical rows does not create historical assessments.
 
 Before live use, verify mappings, cursor ordering, a known first post-baseline transaction, retry behavior and restart continuity against a representative test source. Reconcile source counts and amounts; connection status is not evidence of completeness.
@@ -24,7 +25,7 @@ There is no silent history-only importer. Historical transactions use authentica
 
 1. Agree a coverage window and cutover with the institution; test representative data separately first.
 2. Pause the live sender while loading the agreed history. Do not silently disable screening or review controls.
-3. Send oldest first across feeds, preserving original timestamps with offsets, account IDs, currencies, directions, cash classification and business dates. Never omit historical timestamps: omitted timestamps use current time.
+3. Send oldest first across feeds, preserving original timestamps with offsets, account IDs, account-holder IDs, currencies, directions, instruments, channels, cash classification, business dates, branch/location IDs and conductor details. Never omit historical timestamps: omitted timestamps use current time.
 4. Await responses and resolve failures before advancing that account. Retry identical IDs and payloads. Reconcile receipts, counts and amounts by account, currency and day.
 5. Resume live traffic after reconciling the cutover and assigning review responsibility. Late submissions do not rewrite later assessments. The earliest imported records have limited prior history; their results do not prove a fully populated baseline.
 

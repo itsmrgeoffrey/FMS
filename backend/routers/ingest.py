@@ -39,8 +39,14 @@ class TxnIn(BaseModel):
     currency: str = Field("USD", pattern="^[A-Za-z]{3}$")
     reference: str | None = Field(None, max_length=255)
     account_holder_name: str | None = Field(None, max_length=200)
+    account_holder_id: str | None = Field(None, max_length=64)
     is_cash: bool | None = None
     business_date: date | None = None
+    transaction_instrument: str | None = Field(None, max_length=40)
+    branch_id: str | None = Field(None, max_length=64)
+    location_id: str | None = Field(None, max_length=64)
+    conductor_id: str | None = Field(None, max_length=64)
+    conductor_name: str | None = Field(None, max_length=200)
 
     @field_validator("external_id", "account_id")
     @classmethod
@@ -58,9 +64,13 @@ async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
     txn = NormalizedTransaction(id=body.external_id, account_id=body.account_id,
         amount=body.amount, direction=body.direction, timestamp=body.timestamp or datetime.utcnow(),
         counterparty_account=body.counterparty_account, counterparty_name=body.counterparty_name,
-        account_holder_name=body.account_holder_name, channel=body.channel, currency=body.currency,
+        account_holder_name=body.account_holder_name, account_holder_id=body.account_holder_id,
+        channel=body.channel, currency=body.currency,
         reference=body.reference, status=None, source_table="api", is_cash=body.is_cash,
-        business_date=body.business_date.isoformat() if body.business_date else None)
+        business_date=body.business_date.isoformat() if body.business_date else None,
+        transaction_instrument=body.transaction_instrument, branch_id=body.branch_id,
+        location_id=body.location_id, conductor_id=body.conductor_id,
+        conductor_name=body.conductor_name)
     return await processing.process(txn, timestamp_supplied=body.timestamp is not None)
 
 

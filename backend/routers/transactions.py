@@ -32,12 +32,12 @@ async def inject_transaction(payload: TransactionPayload, _admin: User = Depends
     if ENVIRONMENT.lower() != "development":
         raise HTTPException(status_code=404, detail="Demo transaction injection is disabled")
 
-    adapter = get_adapter()
+    table_key = "outward" if payload.direction == "OUTWARD" else "inward"
+    adapter = get_adapter(table_key)
 
     if not await adapter.is_connected():
         raise HTTPException(status_code=503, detail="Bank DB not connected")
 
-    table_key = "outward" if payload.direction == "OUTWARD" else "inward"
     tables = bank_config.get("tables", {})
 
     if table_key not in tables:

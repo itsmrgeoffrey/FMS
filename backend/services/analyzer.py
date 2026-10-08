@@ -204,6 +204,8 @@ SYSTEM_PROMPT = (
 
 def _pick_fraud_type(risk: "RiskScoreResult") -> str | None:
     c = risk.components
+    if "cross_branch_structuring" in c:
+        return "cross-branch cash structuring"
     if "multi_source_smurfing" in c:
         return "multi-source smurfing"
     if "outward_smurfing" in c:
@@ -283,6 +285,7 @@ class FraudAnalysis:
     screening_status: str = "NOT_SCREENED"
     screening_matches: list | None = None
     regulatory_review: bool = False
+    structuring_alert: bool = False
     assessed_rules: dict | None = None
 
 
@@ -359,7 +362,7 @@ def _assess_ctr(
 # Pattern signals warrant review; they are not an automatic filing determination.
 _STRUCTURING_SIGNALS = frozenset(
     {"near_threshold_amount", "near_miss_spike", "velocity_clustering",
-     "outward_smurfing", "multi_source_smurfing"}
+     "outward_smurfing", "multi_source_smurfing", "cross_branch_structuring"}
 )
 
 
@@ -486,6 +489,39 @@ def _compute_risk_score(
     rolling_total, rolling_count = _rolling_window(txn, history)
     src_count_48h, inbound_total_48h = _inbound_sources(txn, history)
 
+    # Cash split across branches/locations on one business day is a separate
+    # suspicious pattern from CTR applicability. Every contributing item must
+    # be individually at or below the benchmark; the aggregate may still
+    # trigger CTR review independently under the reporting rules above.
+    current_location = txn.branch_id or txn.location_id
+    if txn.is_cash is True and current_location:
+        today = business_day(txn)
+        benchmark = Decimal(str(threshold))
+        prior_cash = [
+            h for h in history
+            if h.is_cash is True
+            and h.direction == txn.direction
+            and business_day(h) == today
+            and (h.branch_id or h.location_id)
+            and h.amount <= benchmark
+        ]
+        cash_items = prior_cash + [txn]
+        locations = {h.branch_id or h.location_id for h in cash_items}
+        cash_total = sum((h.amount for h in cash_items), Decimal(0))
+        if txn.amount <= benchmark and len(cash_items) >= 2 and len(locations) >= 2 and cash_total >= benchmark:
+            components["cross_branch_structuring"] = {
+                "score": 35,
+                "transaction_count": len(cash_items),
+                "location_count": len(locations),
+                "aggregate": float(cash_total),
+                "reason": (
+                    f"{len(cash_items)} individually sub-threshold cash transactions across "
+                    f"{len(locations)} branches or locations on {today} total "
+                    f"{txn.currency} {cash_total:,.2f}"
+                ),
+            }
+            score += 35
+
     # ── 1. Behavioral deviation: how far is this from the account's norm (0-35) ──
     if profile.transaction_count == 0:
         dev_pts = 20 if txn.amount >= threshold * 0.5 else 10
@@ -599,7 +635,7 @@ def _compute_risk_score(
             components["outward_smurfing"] = {
                 "score": 20,
                 "reason": (
-                    f"Cumulative outward to same counterparty today: "
+                    f"Cumulative outward to same beneficiary today: "
                     f"{txn.currency} {cp_day_total:,.2f} across {len(cp_today) + 1} transactions"
                 ),
             }
@@ -646,7 +682,7 @@ def _compute_risk_score(
         cp_pts = 12 if txn.amount >= threshold else 6
         components["new_counterparty"] = {
             "score": cp_pts,
-            "reason": "Counterparty has never appeared in this account's transaction history",
+            "reason": "Beneficiary or sender has never appeared in this account's transaction history",
         }
         score += cp_pts
 
@@ -760,6 +796,15 @@ def _plain_reasons(
             f"reporting threshold — a pattern of multiple such amounts could indicate deliberate splitting."
         )
 
+    if "cross_branch_structuring" in c:
+        signal = c["cross_branch_structuring"]
+        reasons.append(
+            f"Structuring alert: {signal['transaction_count']} cash transactions across "
+            f"{signal['location_count']} branches or locations on the same business day total "
+            f"{cur} {signal['aggregate']:,.2f}; each transaction was at or below the "
+            f"{cur} {threshold:,.0f} benchmark. Review for deliberate transaction splitting."
+        )
+
     if "velocity_clustering" in c:
         verb = "received" if receiving else "made"
         reasons.append(
@@ -788,7 +833,7 @@ def _plain_reasons(
         )
 
     if "new_counterparty" in c:
-        name = txn.counterparty_name or txn.counterparty_account or ("the sender" if receiving else "the recipient")
+        name = txn.counterparty_name or txn.counterparty_account or ("the sender" if receiving else "the beneficiary")
         if receiving:
             reasons.append(f"{name} has never sent money to this account before.")
         else:
@@ -842,7 +887,8 @@ def _fallback_summary(
 # path, so a backtest result is exactly what the live engine would have done.
 
 _HARD_FRAUD_SIGNALS = frozenset(
-    {"near_threshold_amount", "velocity_clustering", "outward_smurfing", "multi_source_smurfing"}
+    {"near_threshold_amount", "velocity_clustering", "outward_smurfing",
+     "multi_source_smurfing", "cross_branch_structuring"}
 )
 
 
@@ -887,7 +933,8 @@ async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransactio
     matches = []
     screening_status = "NO_MATCH"
     screening_notes = []
-    for role, name in (("account holder", txn.account_holder_name), ("counterparty", txn.counterparty_name)):
+    party_role = "beneficiary" if txn.direction == "OUTWARD" else "sender"
+    for role, name in (("account holder", txn.account_holder_name), (party_role, txn.counterparty_name)):
         if not name or not name.strip():
             screening_status = "INCOMPLETE" if screening_status == "NO_MATCH" else screening_status
             screening_notes.append(f"Manual screening required: {role} name is missing.")
@@ -928,14 +975,14 @@ async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransactio
     # references actual values, not generic phrases.
     if profile.transaction_count > 0:
         amount_multiple = float(txn.amount) / profile.avg_amount if profile.avg_amount > 0 else 0
-        cp_status = "(NEW — never seen before)" if "new_counterparty" in risk.components else "(known counterparty)"
+        cp_status = "(NEW — never seen before)" if "new_counterparty" in risk.components else f"(known {party_role})"
         ch_status = "(NEW — never used before)" if "new_channel" in risk.components else ""
         t_status = "(unusual hours — 01:00–04:00)" if "odd_hours" in risk.components else ""
         delta_block = (
             f"ACCOUNT BASELINE (last 90 days, {profile.transaction_count} transactions):\n"
             f"  Typical amount    : {txn.currency} {profile.avg_amount:,.0f}\n"
             f"  Historical max    : {txn.currency} {profile.max_amount:,.0f}\n"
-            f"  Known counterparties : {profile.known_counterparties}\n\n"
+            f"  Known beneficiaries/senders : {profile.known_counterparties}\n\n"
             f"THIS TRANSACTION:\n"
             f"  Amount  : {txn.currency} {txn.amount:,.2f}  ({amount_multiple:.1f}x the account average)\n"
             f"  To      : {txn.counterparty_name or txn.counterparty_account or 'unknown'}  {cp_status}\n"
@@ -1012,6 +1059,7 @@ Respond with ONLY this JSON:
         screening_status=screening_status,
         screening_matches=matches,
         regulatory_review=regulatory_review,
+        structuring_alert="cross_branch_structuring" in risk.components,
         assessed_rules=assessed_rules,
     )
 
@@ -1019,7 +1067,7 @@ Respond with ONLY this JSON:
 def _format_history(txns: list[NormalizedTransaction]) -> str:
     if not txns:
         return "No prior transactions found."
-    lines = ["Timestamp              | Dir     | Amount        | Counterparty           | Channel"]
+    lines = ["Timestamp              | Dir     | Amount        | Beneficiary / sender   | Channel"]
     lines.append("-" * 90)
     for t in txns[:50]:
         lines.append(

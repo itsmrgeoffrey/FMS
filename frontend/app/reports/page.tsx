@@ -114,7 +114,7 @@ export default function ReportsPage() {
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
                 <th className="px-4 py-3 font-medium">Account</th>
                 <th className="px-4 py-3 font-medium">Amount</th>
-                <th className="px-4 py-3 font-medium">Counterparty</th>
+                <th className="px-4 py-3 font-medium">Beneficiary / sender</th>
                 {tab === "sar" ? (
                   <>
                     <th className="px-4 py-3 font-medium">Type</th>
@@ -164,7 +164,7 @@ export default function ReportsPage() {
             <div>
               <h2 className="text-sm font-semibold text-gray-700">FinCEN 314(a) scan</h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                Upload the 314(a) subject list (CSV) — FMS scans it against every account holder and counterparty it has seen. The file is scanned in memory and never stored.
+                Upload the 314(a) subject list (CSV) — FMS scans it against every account holder, beneficiary, and sender it has seen. The file is scanned in memory and never stored.
               </p>
             </div>
             <label className={`text-sm font-medium px-3 py-1.5 rounded-lg border cursor-pointer ${scanning ? "opacity-50" : "border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"}`}>

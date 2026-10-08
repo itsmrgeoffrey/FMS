@@ -6,6 +6,7 @@ import type { FraudCaseListItem, CasesPage } from "@/types";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { StatusBadge } from "./StatusBadge";
 import { RiskScoreBadge } from "./RiskScoreBadge";
+import { DirectionBadge } from "./ReviewUI";
 
 const STATUSES = ["", "CLEAN", "OPEN", "UNDER_REVIEW", "CONFIRMED_FRAUD", "DISMISSED", "ESCALATED"];
 const CONFIDENCES = ["", "HIGH", "MEDIUM", "LOW"];
@@ -23,16 +24,17 @@ export function CasesTable({ refresh }: { refresh?: number }) {
   const [data, setData] = useState<CasesPage | null>(null);
   const [status, setStatus] = useState("");
   const [confidence, setConfidence] = useState("");
+  const [direction, setDirection] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getCases({ status: status || undefined, confidence: confidence || undefined, page, limit: 20 })
+    api.getCases({ status: status || undefined, confidence: confidence || undefined, direction: direction || undefined, page, limit: 20 })
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [status, confidence, page]);
+  }, [status, confidence, direction, page]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (refresh) load(); }, [refresh, load]);
@@ -49,6 +51,9 @@ export function CasesTable({ refresh }: { refresh?: number }) {
         <select value={confidence} onChange={(e) => { setConfidence(e.target.value); setPage(1); }} className={selectCls}>
           {CONFIDENCES.map((c) => <option key={c} value={c}>{c || "All confidence"}</option>)}
         </select>
+        <select aria-label="Direction" value={direction} onChange={(e) => { setDirection(e.target.value); setPage(1); }} className={selectCls}>
+          <option value="">Inward and outward</option><option value="INWARD">Inward</option><option value="OUTWARD">Outward</option>
+        </select>
         <span className="ml-auto text-xs text-gray-400 self-center tabular-nums">
           {data ? `${data.total} cases` : ""}
         </span>
@@ -64,7 +69,7 @@ export function CasesTable({ refresh }: { refresh?: number }) {
               <th className="px-4 py-2.5 font-semibold">Narration</th>
               <th className="px-4 py-2.5 font-semibold text-right">Amount</th>
               <th className="px-4 py-2.5 font-semibold">Dir</th>
-              <th className="px-4 py-2.5 font-semibold">Counterparty</th>
+              <th className="px-4 py-2.5 font-semibold">Beneficiary / sender</th>
               <th className="px-4 py-2.5 font-semibold">Fraud Type</th>
               <th className="px-4 py-2.5 font-semibold">Filings</th>
               <th className="px-4 py-2.5 font-semibold">Risk</th>
@@ -86,9 +91,7 @@ export function CasesTable({ refresh }: { refresh?: number }) {
                 <td className="px-4 py-3 text-gray-500 text-xs max-w-[160px] truncate">{c.reference || "—"}</td>
                 <td className="px-4 py-3 font-semibold text-gray-900 whitespace-nowrap text-right tabular-nums">{fmt(c.amount, c.currency)}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${c.direction === "INWARD" ? "bg-emerald-50 text-emerald-700" : "bg-orange-50 text-orange-700"}`}>
-                    {c.direction}
-                  </span>
+                  <DirectionBadge direction={c.direction} />
                 </td>
                 <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.counterparty_name || "—"}</td>
                 <td className="px-4 py-3 text-gray-600 capitalize">{c.fraud_type || "—"}</td>

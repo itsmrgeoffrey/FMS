@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,8 +46,36 @@ _ENV_PATH = Path(os.getenv("FMS_ENV_FILE", "").strip() or (ROOT / ".env"))
 MAPPABLE_FIELDS = [
     "id", "account_id", "amount", "timestamp", "counterparty_account",
     "counterparty_name", "channel", "currency", "reference", "status", "batch_id",
-    "account_holder_name", "is_cash", "business_date",
+    "account_holder_name", "account_holder_id", "is_cash", "business_date",
+    "transaction_instrument", "branch_id", "location_id", "conductor_id", "conductor_name",
 ]
+
+_DATABASE_FIELDS = (
+    "type", "host", "port", "user", "database", "trusted_connection",
+    "encrypt", "trust_server_certificate",
+)
+
+
+def _public_database(db: dict) -> dict:
+    return {
+        "type": db.get("type", "mysql"),
+        "host": db.get("host", ""),
+        "port": db.get("port", 3306),
+        "user": db.get("user", ""),
+        "password_set": bool(db.get("password")),
+        "database": db.get("database", ""),
+        "trusted_connection": bool(db.get("trusted_connection", False)),
+        "encrypt": bool(db.get("encrypt", False)),
+        "trust_server_certificate": bool(db.get("trust_server_certificate", True)),
+    }
+
+
+def _merge_database(existing: dict, incoming: dict) -> dict:
+    merged = {field: incoming[field] for field in _DATABASE_FIELDS if field in incoming}
+    password = incoming.get("password") or existing.get("password")
+    if password:
+        merged["password"] = password
+    return merged
 
 
 class DatabaseSettings(BaseModel):
@@ -170,19 +198,15 @@ async def get_settings():
     mon = bank_config.get("monitoring", {}) or {}
     inst = bank_config.get("institution", {}) or {}
     _dir = bank_config.get("directory", {}) or {}
+    public_tables = {}
+    for key, config in (bank_config.get("tables", {}) or {}).items():
+        public_config = {k: v for k, v in config.items() if k != "database"}
+        if config.get("database"):
+            public_config["database"] = _public_database(config["database"])
+        public_tables[key] = public_config
     return {
-        "database": {
-            "type": db.get("type", "mysql"),
-            "host": db.get("host", ""),
-            "port": db.get("port", 3306),
-            "user": db.get("user", ""),
-            "password_set": bool(db.get("password")),
-            "database": db.get("database", ""),
-            "trusted_connection": bool(db.get("trusted_connection", False)),
-            "encrypt": bool(db.get("encrypt", False)),
-            "trust_server_certificate": bool(db.get("trust_server_certificate", True)),
-        },
-        "tables": bank_config.get("tables", {}),
+        "database": _public_database(db),
+        "tables": public_tables,
         "mappable_fields": MAPPABLE_FIELDS,
         "monitoring": {
             "poll_interval_seconds": int(mon.get("poll_interval_seconds", 30)),
@@ -231,17 +255,23 @@ async def get_settings():
 
 
 @router.post("/test-connection")
-async def test_connection(user: User = Depends(require_admin)):
+async def test_connection(
+    source: str = Query("shared", pattern="^(shared|inward|outward)$"),
+    user: User = Depends(require_admin),
+):
     """Attempt a connection to the configured bank database and report status."""
+    if source != "shared" and source not in (bank_config.get("tables", {}) or {}):
+        raise HTTPException(404, f"No '{source}' transaction source is configured")
     try:
-        adapter = poller.get_adapter()
+        adapter = poller.get_adapter(source)
         connected = await adapter.is_connected()
         if not connected:
             await adapter.connect()
             connected = await adapter.is_connected()
         if connected:
+            db_config = bank_config.get("database", {}) if source == "shared" else poller.source_database(source)
             return {"connected": True, "message": "Connection successful.",
-                    "db_type": bank_config.get("database", {}).get("type", "")}
+                    "source": source, "db_type": db_config.get("type", "")}
         return {"connected": False, "message": "Could not establish a connection."}
     except Exception as e:
         return {"connected": False, "message": f"Connection failed: {e}"}
@@ -281,6 +311,7 @@ async def system_info(user: User = Depends(require_admin)):
         "environment": ENVIRONMENT,
         "ingestion_mode": "api" if api_mode else "poll",
         "database_connected": bank_connected,
+        "source_connections": poller.connection_statuses(),
         "poller_running": poller.is_running(),
         "poller_last_error": poller.last_error(),
         "database_type": bank_config.get("database", {}).get("type", ""),
@@ -394,7 +425,15 @@ async def _apply_settings(body: SettingsUpdate, actor: str, request: Request | N
         restart_required = True
 
     if body.tables is not None:
-        data["tables"] = body.tables
+        existing_tables = data.get("tables", {}) or {}
+        next_tables = {}
+        for key, config in body.tables.items():
+            next_config = {k: v for k, v in config.items() if k != "database"}
+            if config.get("database") is not None:
+                existing_database = (existing_tables.get(key, {}) or {}).get("database", {}) or {}
+                next_config["database"] = _merge_database(existing_database, config["database"])
+            next_tables[key] = next_config
+        data["tables"] = next_tables
         restart_required = True
 
     if body.monitoring is not None:

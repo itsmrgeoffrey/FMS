@@ -37,6 +37,29 @@ function Field({
   );
 }
 
+function DatabaseConnectionFields({ db, onSet }: { db: any; onSet: (field: string, value: unknown) => void }) {
+  return <div className="space-y-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div>
+        <label className="block text-xs text-gray-500 font-medium mb-1">Type</label>
+        <select value={db.type ?? "mysql"} onChange={(e) => onSet("type", e.target.value)} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="mysql">MySQL</option><option value="mssql">SQL Server (MSSQL)</option><option value="postgres">PostgreSQL</option><option value="oracle">Oracle</option>
+        </select>
+      </div>
+      <Field label="Host" value={db.host ?? ""} onChange={(v) => onSet("host", v)} placeholder="Hostname or IP address" />
+      <Field label="Port" value={db.port ?? ""} type="number" onChange={(v) => onSet("port", Number(v) || 0)} />
+      <Field label="Database" value={db.database ?? ""} onChange={(v) => onSet("database", v)} />
+      <Field label="User" value={db.user ?? ""} onChange={(v) => onSet("user", v)} hint="Use a read-only DB user" />
+      <Field label="Password" value={db.password ?? ""} type="password" placeholder={db.password_set ? "Stored securely" : "Not set"} onChange={(v) => onSet("password", v)} hint={db.password_set ? "Leave blank to keep the stored password." : "Enter the read-only user's password."} />
+    </div>
+    <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-700">
+      <label className="flex items-center gap-2"><input type="checkbox" checked={!!db.trusted_connection} onChange={(e) => onSet("trusted_connection", e.target.checked)} className="rounded border-gray-300" />Windows Authentication</label>
+      <label className="flex items-center gap-2"><input type="checkbox" checked={!!db.encrypt} onChange={(e) => onSet("encrypt", e.target.checked)} className="rounded border-gray-300" />Encrypt connection (TLS)</label>
+      <label className="flex items-center gap-2"><input type="checkbox" checked={!!db.trust_server_certificate} onChange={(e) => onSet("trust_server_certificate", e.target.checked)} className="rounded border-gray-300" />Trust server certificate</label>
+    </div>
+  </div>;
+}
+
 function Section({
   title, subtitle, children, onSave, saving, badge,
 }: {
@@ -704,6 +727,21 @@ function SettingsContent() {
     });
   };
 
+  const toggleSeparateDatabase = (tableKey: string, enabled: boolean) => {
+    setData((prev: any) => {
+      const next = structuredClone(prev);
+      if (enabled) {
+        const shared = structuredClone(next.database);
+        delete shared.password;
+        delete shared.password_set;
+        next.tables[tableKey].database = { ...shared, password: "", password_set: false };
+      } else {
+        delete next.tables[tableKey].database;
+      }
+      return next;
+    });
+  };
+
   // Non-admins have no Administration access — just their own account.
   if (!isAdmin) {
     return (
@@ -799,8 +837,8 @@ function SettingsContent() {
       {tab === "system" && isAdmin && (<>
       {/* Bank database */}
       <Section
-        title="Bank Database"
-        subtitle="Read-only connection to your core/transaction database"
+        title="Shared Bank Database"
+        subtitle="Default read-only connection used by any feed without its own database override"
         badge="Pending Restart"
         saving={saving === "database"}
         onSave={() =>
@@ -913,7 +951,7 @@ function SettingsContent() {
       {/* Table mappings */}
       <Section
         title="Table Mappings"
-        subtitle="Map your table columns onto the fields FMS understands"
+        subtitle="Map each feed and optionally connect it to a separate read-only database"
         badge="Pending Restart"
         saving={saving === "tables"}
         onSave={() => save("tables", { tables })}
@@ -921,9 +959,18 @@ function SettingsContent() {
         <div className="space-y-6">
           {Object.entries(tables).map(([key, cfg]: [string, any]) => (
             <div key={key} className="border border-gray-100 rounded-lg p-4">
-              <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-3">
-                {key} transactions
-              </p>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div><p className="text-xs font-bold text-gray-600 uppercase tracking-wide">{key} transactions</p>
+                  <p className="mt-1 text-xs text-gray-400">Every row from this feed enters the same FMS review engine.</p></div>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={!!cfg.database} onChange={(e) => toggleSeparateDatabase(key, e.target.checked)} className="rounded border-gray-300" />
+                  Use separate database
+                </label>
+              </div>
+              {cfg.database && <div className="mb-5 border-l-2 border-blue-200 pl-4">
+                <p className="mb-3 text-xs font-semibold text-blue-800">{key === "inward" ? "Inward" : "Outward"} feed connection</p>
+                <DatabaseConnectionFields db={cfg.database} onSet={(field, value) => set(["tables", key, "database", field], value)} />
+              </div>}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <Field
                   label="Table name"
@@ -1124,6 +1171,15 @@ function SettingsContent() {
           <div><p className="text-xs text-gray-400">Encryption</p><p className="text-gray-800 font-medium">Tokens signed{sysInfo?.encryption?.db_tls ? " · DB TLS on" : " · DB TLS off"}</p></div>
           <div><p className="text-xs text-gray-400">Server time (UTC)</p><p className="text-gray-800 font-medium">{sysInfo?.server_time ? new Date(sysInfo.server_time).toLocaleString("en-GB") : "—"}</p></div>
         </div>
+        {sysInfo?.source_connections && Object.keys(sysInfo.source_connections).length > 0 && <div className="mt-4 border-t border-gray-100 pt-4">
+          <p className="mb-2 text-xs font-semibold uppercase text-gray-500">Transaction sources</p>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(sysInfo.source_connections).map(([source, value]: [string, any]) => <span key={source} className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <span className={`h-2 w-2 rounded-full ${value.connected ? "bg-green-500" : "bg-red-500"}`} />
+              <span className="capitalize">{source}</span> {value.connected ? "connected" : "disconnected"}
+            </span>)}
+          </div>
+        </div>}
       </section>
 
       {/* Security best practices */}

@@ -6,7 +6,7 @@ import type { FraudCaseListItem } from "@/types";
 import Pagination from "@/components/Pagination";
 import { LoadError, RefreshButton, ReviewTable } from "@/components/ReviewUI";
 
-const defaults = { search: "", status: "", flag: "", min_risk: "", sort: "risk" };
+const defaults = { search: "", status: "", direction: "", flag: "", min_risk: "", sort: "risk" };
 
 export default function AlertsPage() {
   const [filters, setFilters] = useState(defaults);
@@ -44,7 +44,7 @@ export default function AlertsPage() {
         <p role="status" className="mt-2 text-sm text-gray-500">{loading ? "Updating queue..." : error ? "Queue unavailable" : `${total.toLocaleString()} ${filtered ? "matching" : "open"} ${total === 1 ? "transaction" : "transactions"}`}</p></div>
       <RefreshButton loading={loading} onClick={() => { start(); setRefresh(v => v + 1); }} />
     </header>
-    <div className="grid grid-cols-2 items-end gap-3 xl:grid-cols-[minmax(240px,2fr)_1fr_1fr_1fr_1fr_auto]">
+    <div className="grid grid-cols-2 items-end gap-3 xl:grid-cols-[minmax(220px,2fr)_1fr_1fr_1fr_1fr_1fr_auto]">
       <form className="col-span-2 xl:col-span-1" onSubmit={e => { e.preventDefault(); change("search", draft.trim()); }}>
         <label htmlFor="queue-search" className="mb-1.5 block text-xs font-medium text-gray-600">Search transactions</label>
         <div className="relative"><input id="queue-search" className="review-input pr-10" type="search" maxLength={200} value={draft} onChange={e => setDraft(e.target.value)} placeholder="Account, source, reference..." />
@@ -53,8 +53,11 @@ export default function AlertsPage() {
       <label className="text-xs font-medium text-gray-600">Status<select className="review-input mt-1.5" value={filters.status} onChange={e => change("status", e.target.value)}>
         <option value="">All open reviews</option><option value="OPEN">Open</option><option value="UNDER_REVIEW">Under review</option><option value="ESCALATED">Escalated</option><option value="CLEAN">Legacy clean / flagged</option>
       </select></label>
+      <label className="text-xs font-medium text-gray-600">Direction<select className="review-input mt-1.5" value={filters.direction} onChange={e => change("direction", e.target.value)}>
+        <option value="">Inward and outward</option><option value="INWARD">Inward</option><option value="OUTWARD">Outward</option>
+      </select></label>
       <label className="text-xs font-medium text-gray-600">Review flag<select className="review-input mt-1.5" value={filters.flag} onChange={e => change("flag", e.target.value)}>
-        <option value="">All flags</option><option value="ctr">CTR review</option><option value="sar">SAR review</option><option value="sanctions">Possible sanctions match</option>
+        <option value="">All flags</option><option value="structuring">Structuring alert</option><option value="ctr">CTR review</option><option value="sar">SAR review</option><option value="sanctions">Possible sanctions match</option>
       </select></label>
       <label className="text-xs font-medium text-gray-600">Risk score<select className="review-input mt-1.5" value={filters.min_risk} onChange={e => change("min_risk", e.target.value)}>
         <option value="">All scores</option><option value="31">Medium and above</option><option value="56">High and above</option><option value="76">Critical</option>

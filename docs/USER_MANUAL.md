@@ -11,7 +11,7 @@ This manual is for the people who operate FMS day to day — compliance officers
 FMS watches your institution's transaction database in near-real time and:
 
 1. **Analyzes every new transaction** with a deterministic rule engine (structuring, smurfing, velocity, behavioral deviation, and more). No black box: every flag comes with plain-English reasons.
-2. **Screens every counterparty** against the US Treasury OFAC sanctions (SDN) list.
+2. **Screens every beneficiary or sender** against the US Treasury OFAC sanctions (SDN) list.
 3. **Identifies regulatory obligations** — Currency Transaction Reports (CTR) and Suspicious Activity Reports (SAR) — with filing worksheets and deadline tracking.
 4. **Raises alerts** so your team can act while it matters (e.g., place a hold before funds are swept), and records every decision in an audit trail.
 
@@ -103,9 +103,9 @@ The sidebar is grouped into sections (click a bold header to collapse it):
 Open a case from **Alerts**, **Cases**, or the Dashboard's "Needs attention" list.
 
 **A case shows:**
-- **Transaction details** — account, amount, direction, counterparty, channel, time.
+- **Transaction details** — account, amount, direction, beneficiary/sender, channel, time.
 - **Regulatory panels** (when applicable):
-  - 🔴 **OFAC MATCH** — the counterparty matched the sanctions list. This is a block/reject obligation, not a suggestion. Verify the match (name screening can false-positive), then escalate to your BSA officer immediately.
+  - 🔴 **OFAC MATCH** — the beneficiary or sender matched the sanctions list. This is a block/reject obligation, not a suggestion. Verify the match (name screening can false-positive), then escalate to your BSA officer immediately.
   - 🟡 **SAR RECOMMENDED** — suspicious activity meeting the SAR reporting bar, with the reason.
   - 🔵 **CTR REQUIRED** — a Currency Transaction Report obligation (this alone does not mean fraud).
 - **Fraud Risk Analysis** — the 0–100 risk score, the fraud typology (e.g., "multi-source smurfing", "invoice fraud"), and plain-English reasons for every signal that fired.
@@ -146,7 +146,7 @@ Connection status (Connected/Disconnected, last checked), type (MySQL/SQL Server
 > Database and table-mapping changes are saved immediately but need a **backend restart** to take effect (the badge says "Pending Restart").
 
 ### 8.2 System Settings → Table Mappings
-Map your table and column names onto the fields FMS understands (id, account, amount, timestamp, counterparty, channel, currency, reference), separately for inward and outward tables.
+Map your table and column names onto the fields FMS understands (id, account, amount, timestamp, beneficiary/sender, channel, currency, reference), separately for inward and outward tables.
 
 ### 8.3 System Settings → Monitoring
 Poll interval (how often FMS checks for new transactions) and the history window used as each account's behavioral baseline. Applied live.
@@ -194,7 +194,7 @@ Try these and watch the Dashboard/Alerts react (within one poll interval, ~15–
 | High-value + CTR | A single transfer over $10,000 |
 | Structuring flag | An amount just under $10,000 (e.g., $9,500) |
 | Multi-source smurfing | 3–4 inward transfers from *different* senders to one account, each a few thousand dollars, within minutes |
-| Invoice-fraud pattern | A large outward transfer to a counterparty the account has never paid |
+| Invoice-fraud pattern | A large outward transfer to a beneficiary the account has never paid |
 
 ---
 

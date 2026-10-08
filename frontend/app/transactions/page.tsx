@@ -5,6 +5,7 @@ import { api, type DateRange } from "@/lib/api";
 import DateRangePicker from "@/components/DateRangePicker";
 import Pagination from "@/components/Pagination";
 import type { FraudCaseListItem } from "@/types";
+import { DirectionBadge } from "@/components/ReviewUI";
 
 function money(a: number, c: string) {
   const s = c === "USD" ? "$" : c === "NGN" ? "₦" : c + " ";
@@ -37,6 +38,7 @@ function ResultBadge({ c }: { c: FraudCaseListItem }) {
 export default function TransactionsPage() {
   const [items, setItems] = useState<FraudCaseListItem[]>([]);
   const [filter, setFilter] = useState<"all" | "flagged" | "clean">("all");
+  const [direction, setDirection] = useState<"" | "INWARD" | "OUTWARD">("");
   const [range, setRange] = useState<DateRange>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -47,7 +49,7 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    api.getCases({ limit: 25, page, ...(filter === "all" ? {} : { result: filter }), ...range })
+    api.getCases({ limit: 25, page, ...(filter === "all" ? {} : { result: filter }), ...(direction ? { direction } : {}), ...range })
       .then((p) => {
         if (!cancelled) { setItems(p.items); setTotal(p.total); }
       })
@@ -58,7 +60,7 @@ export default function TransactionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [range, filter, page, refresh]);
+  }, [range, filter, direction, page, refresh]);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -69,6 +71,10 @@ export default function TransactionsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <DateRangePicker value={range} onChange={(value) => { startLoading(); setRange(value); setPage(1); }} />
+          <label className="sr-only" htmlFor="transaction-direction">Direction</label>
+          <select id="transaction-direction" value={direction} onChange={(e) => { startLoading(); setDirection(e.target.value as typeof direction); setPage(1); }} className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">Inward and outward</option><option value="INWARD">Inward</option><option value="OUTWARD">Outward</option>
+          </select>
           <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium">
             {(["all", "flagged", "clean"] as const).map((f) => (
               <button key={f} onClick={() => { if (f !== filter) { startLoading(); setFilter(f); setPage(1); } }}
@@ -89,7 +95,7 @@ export default function TransactionsPage() {
               <th className="px-4 py-3 font-medium">Account</th>
               <th className="px-4 py-3 font-medium">Amount</th>
               <th className="px-4 py-3 font-medium">Dir</th>
-              <th className="px-4 py-3 font-medium">Counterparty</th>
+              <th className="px-4 py-3 font-medium">Beneficiary / sender</th>
               <th className="px-4 py-3 font-medium">Result</th>
               <th className="px-4 py-3 font-medium" />
             </tr>
@@ -106,7 +112,7 @@ export default function TransactionsPage() {
                 <td className="px-4 py-3 font-mono text-gray-800">{c.account_id}</td>
                 <td className="px-4 py-3 font-semibold text-gray-900 whitespace-nowrap">{money(c.amount, c.currency)}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${c.direction === "INWARD" ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700"}`}>{c.direction}</span>
+                  <DirectionBadge direction={c.direction} />
                 </td>
                 <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.counterparty_name || "—"}</td>
                 <td className="px-4 py-3">

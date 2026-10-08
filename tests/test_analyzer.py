@@ -148,6 +148,27 @@ def test_velocity_clustering_detected():
     assert "velocity_clustering" in risk.components
 
 
+def test_cross_branch_cash_structuring_is_an_explicit_alert_separate_from_ctr():
+    prior = txn(id="branch-a", amount=6_000, branch_id="BR-001", business_date="2026-06-01")
+    current = txn(amount=4_000, branch_id="BR-002", business_date="2026-06-01")
+    verdict = A.evaluate(current, [prior])
+
+    assert "cross_branch_structuring" in verdict["risk"].components
+    assert verdict["is_fraudulent"]
+    assert not verdict["ctr"].required  # exactly $10,000 is not strictly over the CTR threshold
+
+
+def test_cross_branch_structuring_requires_cash_distinct_locations_and_same_day():
+    prior = txn(id="branch-a", amount=6_000, branch_id="BR-001", business_date="2026-06-01")
+
+    for current in (
+        txn(amount=4_000, branch_id="BR-001", business_date="2026-06-01"),
+        txn(amount=4_000, branch_id="BR-002", business_date="2026-06-02"),
+        txn(amount=4_000, branch_id="BR-002", business_date="2026-06-01", is_cash=False),
+    ):
+        assert "cross_branch_structuring" not in analyze_score(current, [prior]).components
+
+
 # ─── SAR assessment ─────────────────────────────────────────────────────────
 
 def test_sar_not_recommended_when_not_fraudulent():

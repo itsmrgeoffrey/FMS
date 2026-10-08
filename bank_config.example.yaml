@@ -37,6 +37,15 @@ tables:
   # Each section is optional — omit ones that don't apply.
 
   inward:
+    # Optional: uncomment this database block when inward transactions live in
+    # a different database. Without it, the shared database above is used.
+    # database:
+    #   type: postgres
+    #   host: inward-db.internal
+    #   port: 5432
+    #   user: fraud_monitor_reader
+    #   password: your_inward_password_here
+    #   database: inbound_payments
     table_name: inward_transactions
     columns:
       id: txn_id                       # primary key column (used as the poll checkpoint)
@@ -52,6 +61,8 @@ tables:
       # batch_id: batch_id             # optional — set if your table flags payroll/batch runs
 
   outward:
+    # The same optional per-feed database block may be used here when outward
+    # transactions are stored separately. Both feeds still use one FMS engine.
     table_name: outward_transactions
     columns:
       id: txn_id
