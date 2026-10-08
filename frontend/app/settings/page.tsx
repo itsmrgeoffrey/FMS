@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { LoadError, RefreshButton } from "@/components/ReviewUI";
 import { useRouter, useSearchParams } from "next/navigation";
 import RuleEngineSettings from "@/components/RuleEngineSettings";
@@ -742,6 +742,40 @@ function SettingsContent() {
     });
   };
 
+  function addTransactionFeed(direction: "inward" | "outward") {
+    setData((prev: any) => ({
+      ...prev,
+      tables: {
+        ...prev.tables,
+        [direction]: prev.tables?.[direction] ?? { table_name: "", columns: {} },
+      },
+    }));
+  }
+
+  function removeTransactionFeed(key: string) {
+    if (!window.confirm(`Remove the ${key} feed from these settings? Saving and restarting will stop polling this feed.`)) return;
+    setData((prev: any) => {
+      const next = structuredClone(prev);
+      delete next.tables[key];
+      return next;
+    });
+  }
+
+  function saveTransactionFeeds() {
+    for (const [key, cfg] of Object.entries(data.tables ?? {}) as [string, any][]) {
+      if (!cfg.table_name?.trim()) {
+        setError(`Enter a table name for the ${key} feed.`);
+        return;
+      }
+      const missing = ["id", "account_id", "amount", "timestamp"].filter(field => !cfg.columns?.[field]?.trim());
+      if (missing.length) {
+        setError(`Map the required ${key} fields: ${missing.join(", ")}.`);
+        return;
+      }
+    }
+    void save("tables", { tables: data.tables ?? {} });
+  }
+
   // Non-admins have no Administration access — just their own account.
   if (!isAdmin) {
     return (
@@ -954,18 +988,27 @@ function SettingsContent() {
         subtitle="Map each feed and optionally connect it to a separate read-only database"
         badge="Pending Restart"
         saving={saving === "tables"}
-        onSave={() => save("tables", { tables })}
+        onSave={saveTransactionFeeds}
       >
         <div className="space-y-6">
+          <div className="flex flex-wrap items-center gap-3">
+            {(["inward", "outward"] as const).filter(direction => !tables[direction]).map(direction => (
+              <button key={direction} type="button" onClick={() => addTransactionFeed(direction)} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+                <Plus size={16} />Add {direction} feed
+              </button>
+            ))}
+          </div>
+          {Object.keys(tables).length === 0 && <p role="status" className="text-sm text-gray-500">No transaction feeds configured.</p>}
           {Object.entries(tables).map(([key, cfg]: [string, any]) => (
             <div key={key} className="border border-gray-100 rounded-lg p-4">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div><p className="text-xs font-bold text-gray-600 uppercase tracking-wide">{key} transactions</p>
                   <p className="mt-1 text-xs text-gray-400">Every row from this feed enters the same FMS review engine.</p></div>
-                <label className="flex items-center gap-2 text-sm text-gray-700">
+                <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 text-sm text-gray-700">
                   <input type="checkbox" checked={!!cfg.database} onChange={(e) => toggleSeparateDatabase(key, e.target.checked)} className="rounded border-gray-300" />
                   Use separate database
                 </label>
+                <button type="button" onClick={() => removeTransactionFeed(key)} title={`Remove ${key} feed`} aria-label={`Remove ${key} feed`} className="review-icon text-gray-500 hover:text-red-600"><Trash2 size={16} /></button></div>
               </div>
               {cfg.database && <div className="mb-5 border-l-2 border-blue-200 pl-4">
                 <p className="mb-3 text-xs font-semibold text-blue-800">{key === "inward" ? "Inward" : "Outward"} feed connection</p>
@@ -980,7 +1023,7 @@ function SettingsContent() {
                 {fields.map((f) => (
                   <Field
                     key={f}
-                    label={f}
+                    label={f === "counterparty_account" ? (key === "inward" ? "Sender account" : "Beneficiary account") : f === "counterparty_name" ? (key === "inward" ? "Sender name" : "Beneficiary name") : ["id", "account_id", "amount", "timestamp"].includes(f) ? `${f} (required)` : f}
                     value={cfg.columns?.[f] ?? ""}
                     placeholder="(unmapped)"
                     onChange={(v) => {

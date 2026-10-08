@@ -185,14 +185,16 @@ Shown locked ("Coming soon") — the built-in three-role model is active today; 
 
 ## 9. Testing with the simulator
 
-**Tools → Simulate (Demo)** opens a mock banking app that writes transactions into the monitored database — the same path a real core would feed.
+**Tools → Simulate (Demo)** opens a mock banking app that submits transactions directly to the FMS ingestion engine and displays an assessment. It does not transfer funds or write into the institution's source database.
 
-Try these and watch the Dashboard/Alerts react (within one poll interval, ~15–30s):
+Select Send (outward) or Receive (inward), enter the monitored account, amount and beneficiary or sender, then choose a Channel. Branch reveals branch and location fields. For a cash test, choose Branch and Payment method: Cash. Optional customer and cash-presenter identifiers are under Test details. FMS assigns the transaction time and derives the business date from the configured institution timezone. Review the details, then submit for assessment.
+
+Example test scenarios (results depend on the active rules and account history):
 
 | To trigger… | Send… |
 |---|---|
-| High-value + CTR | A single transfer over $10,000 |
-| Structuring flag | An amount just under $10,000 (e.g., $9,500) |
+| Cash / CTR review | A Branch cash deposit over $10,000 USD under the configured US bank profile. A non-cash wire does not qualify for cash CTR review merely because of its value. |
+| Cross-branch structuring alert | Two inward Branch cash deposits to the same account, such as $6,000 and $4,000 at different branch IDs on the same business day, with the behavioral benchmark set to $10,000 USD. |
 | Multi-source smurfing | 3–4 inward transfers from *different* senders to one account, each a few thousand dollars, within minutes |
 | Invoice-fraud pattern | A large outward transfer to a beneficiary the account has never paid |
 

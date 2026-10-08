@@ -6,24 +6,22 @@ import Link from "next/link";
 type Direction = "OUTWARD" | "INWARD";
 type Stage = "home" | "transfer" | "confirm" | "processing" | "success" | "error";
 
-const CHANNELS = ["BRANCH", "TELLER", "ATM", "CASH_DEPOSIT_MACHINE", "MOBILE", "WEB", "USSD", "POS", "API"];
-const INSTRUMENTS = [
-  ["CASH_DEPOSIT", "Cash deposit"],
-  ["CASH_WITHDRAWAL", "Cash withdrawal"],
+const CHANNELS = [
+  ["MOBILE", "Mobile"],
+  ["WEB", "Online banking"],
   ["WIRE", "Wire transfer"],
-  ["ACH", "ACH"],
+  ["ACH", "ACH transfer"],
+  ["BRANCH", "Branch"],
+  ["ATM", "ATM"],
+  ["CASH_DEPOSIT_MACHINE", "Cash deposit machine"],
   ["CHECK", "Check"],
   ["CARD", "Card"],
   ["MONEY_ORDER", "Money order"],
-  ["OTHER", "Other"],
+  ["POS", "Point of sale"],
+  ["USSD", "USSD"],
+  ["API", "API"],
+  ["OTHER", "Other channel"],
 ] as const;
-
-function today() {
-  const d = new Date();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${month}-${day}`;
-}
 
 interface RecentTxn {
   id: string;
@@ -70,10 +68,9 @@ export default function DemoPage() {
     sender_account: "",
     sender_name: "",
     channel: "MOBILE",
+    custom_channel: "",
     narration: "",
     cash_kind: "NON_CASH",
-    transaction_instrument: "WIRE",
-    business_date: today(),
     branch_id: "",
     location_id: "",
     conductor_id: "",
@@ -98,13 +95,15 @@ export default function DemoPage() {
     setLastReference("");
   }
 
-  function setInstrument(value: string) {
+  function setChannel(value: string) {
     setForm(f => ({
       ...f,
-      transaction_instrument: value,
-      cash_kind: value.startsWith("CASH_")
-        ? "CASH"
-        : f.transaction_instrument.startsWith("CASH_") ? "NON_CASH" : f.cash_kind,
+      channel: value,
+      cash_kind: value === "ATM" || value === "CASH_DEPOSIT_MACHINE" ? "CASH" : "NON_CASH",
+      branch_id: "",
+      location_id: "",
+      conductor_id: "",
+      conductor_name: "",
     }));
     setLastReference("");
   }
@@ -130,6 +129,15 @@ export default function DemoPage() {
   }
 
   const monitoredAccountReady = Boolean(form.account_id.trim());
+  const isBranch = form.channel === "BRANCH";
+  const supportsCash = isBranch || ["ATM", "CASH_DEPOSIT_MACHINE", "OTHER"].includes(form.channel);
+  const cashKind = supportsCash ? form.cash_kind : "NON_CASH";
+  const channel = form.channel === "OTHER" ? form.custom_channel.trim() : form.channel;
+  const channelLabel = CHANNELS.find(([value]) => value === form.channel)?.[1] || channel;
+  const instrument = cashKind === "CASH"
+    ? direction === "INWARD" ? "CASH_DEPOSIT" : "CASH_WITHDRAWAL"
+    : ["WIRE", "ACH", "CHECK", "CARD", "MONEY_ORDER"].includes(form.channel) ? form.channel
+    : form.channel === "POS" ? "CARD" : "OTHER";
   const counterpartyReady = direction === "OUTWARD"
     ? Boolean(form.beneficiary_account.trim())
     : Boolean(form.sender_account.trim());
@@ -137,9 +145,7 @@ export default function DemoPage() {
     && parseFloat(form.amount) > 0
     && monitoredAccountReady
     && counterpartyReady
-    && Boolean(form.channel.trim())
-    && Boolean(form.transaction_instrument)
-    && Boolean(form.business_date)
+    && Boolean(channel)
     && !acctError;
 
   async function submit() {
@@ -156,19 +162,18 @@ export default function DemoPage() {
         account_id: form.account_id.trim(),
         amount: form.amount,
         currency: form.currency,
-        channel: form.channel,
+        channel,
         reference: form.narration.trim() || null,
         counterparty_account: (direction === "OUTWARD" ? form.beneficiary_account : form.sender_account).trim(),
         counterparty_name: direction === "OUTWARD" ? form.beneficiary_name : form.sender_name,
         account_holder_name: form.account_holder_name || undefined,
         account_holder_id: form.account_holder_id.trim() || undefined,
-        is_cash: form.cash_kind === "UNKNOWN" ? null : form.cash_kind === "CASH",
-        business_date: form.business_date,
-        transaction_instrument: form.transaction_instrument,
-        branch_id: form.branch_id.trim() || undefined,
-        location_id: form.location_id.trim() || undefined,
-        conductor_id: form.conductor_id.trim() || undefined,
-        conductor_name: form.conductor_name.trim() || undefined,
+        is_cash: cashKind === "UNKNOWN" ? null : cashKind === "CASH",
+        transaction_instrument: instrument,
+        branch_id: isBranch ? form.branch_id.trim() || undefined : undefined,
+        location_id: isBranch ? form.location_id.trim() || undefined : undefined,
+        conductor_id: isBranch && cashKind !== "NON_CASH" ? form.conductor_id.trim() || undefined : undefined,
+        conductor_name: isBranch && cashKind !== "NON_CASH" ? form.conductor_name.trim() || undefined : undefined,
       };
       const token = auth.token();
       const res = await fetch("/api/ingest/simulate", {
@@ -197,12 +202,12 @@ export default function DemoPage() {
   }
 
   return (
-    <div className="h-screen bg-gray-100 flex items-center justify-center overflow-hidden p-2">
+    <div className="h-[calc(100dvh-100px)] lg:h-[calc(100dvh-30px)] bg-gray-100 flex items-center justify-center overflow-hidden p-2">
       <div
         className="bg-white rounded-[48px] shadow-2xl overflow-hidden relative flex flex-col border-[8px] border-gray-900"
         style={{
-          height: "min(844px, calc(100vh - 16px))",
-          width: "min(390px, calc((100vh - 16px) * 390 / 844))",
+          height: "min(844px, 100%)",
+          width: "min(390px, 100%)",
         }}
       >
         {/* Notch */}
@@ -326,7 +331,8 @@ export default function DemoPage() {
                     placeholder="0.00"
                     value={form.amount}
                     onChange={e => set("amount", e.target.value)}
-                    className="flex-1 text-2xl font-semibold tracking-tight text-gray-900 bg-transparent focus:outline-none placeholder-gray-200"
+                    aria-label="Amount"
+                    className="min-w-0 w-full flex-1 text-2xl font-semibold tracking-tight text-gray-900 bg-transparent focus:outline-none placeholder-gray-200"
                   />
                 </div>
                 <div className="h-px bg-gray-100 mt-3" />
@@ -344,19 +350,8 @@ export default function DemoPage() {
                   />
                 </div>
                 <div className="mt-3">
-                  <label className="text-xs text-gray-400 mb-1 block">Account Holder ID</label>
-                  <input
-                    type="text"
-                    placeholder="Customer or member identifier"
-                    value={form.account_holder_id}
-                    onChange={e => set("account_holder_id", e.target.value)}
-                    maxLength={64}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono"
-                  />
-                </div>
-                <div className="mt-3">
                   <label className="text-xs text-gray-400 mb-1 block">
-                    {direction === "OUTWARD" ? "Source Name" : "Receiver Name"}
+                    Account Holder Name
                   </label>
                   <input
                     type="text"
@@ -366,12 +361,6 @@ export default function DemoPage() {
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500"
                   />
                 </div>
-                <label className="text-xs text-gray-400 mt-3 block" htmlFor="cash-kind">Cash classification</label>
-                <select id="cash-kind" value={form.cash_kind} onChange={e => set("cash_kind", e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                  <option value="NON_CASH">Non-cash</option>
-                  <option value="CASH">Cash</option>
-                  <option value="UNKNOWN">Unknown / manual review</option>
-                </select>
               </div>
 
               <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
@@ -430,24 +419,24 @@ export default function DemoPage() {
               <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
                 <p className="text-gray-400 text-xs font-medium uppercase tracking-wide">Transaction Details</p>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block" htmlFor="instrument">Instrument</label>
-                  <select id="instrument" value={form.transaction_instrument} onChange={e => setInstrument(e.target.value)}
+                  <label className="text-xs text-gray-400 mb-1 block" htmlFor="channel">Channel</label>
+                  <select id="channel" value={form.channel} onChange={e => setChannel(e.target.value)}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white">
-                    {INSTRUMENTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    {CHANNELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Channel</label>
-                  <input list="channels" aria-label="Channel" maxLength={40} value={form.channel} onChange={e => set("channel", e.target.value)}
+                {form.channel === "OTHER" && <div>
+                  <label htmlFor="custom-channel" className="text-xs text-gray-400 mb-1 block">Channel name</label>
+                  <input id="custom-channel" maxLength={40} value={form.custom_channel} onChange={e => set("custom_channel", e.target.value)}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white" />
-                  <datalist id="channels">{CHANNELS.map(c => <option key={c} value={c} />)}</datalist>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Business Date</label>
-                  <input type="date" value={form.business_date} onChange={e => set("business_date", e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 bg-white" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
+                </div>}
+                {supportsCash && <div>
+                  <label className="text-xs text-gray-400 mb-1 block" htmlFor="cash-kind">Payment method</label>
+                  <select id="cash-kind" value={cashKind} onChange={e => set("cash_kind", e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 bg-white">
+                    <option value="NON_CASH">Non-cash</option><option value="CASH">Cash</option><option value="UNKNOWN">Unknown / manual review</option>
+                  </select>
+                </div>}
+                {isBranch && <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-400 mb-1 block">Branch ID</label>
                     <input type="text" maxLength={64} placeholder="BR-001" value={form.branch_id} onChange={e => set("branch_id", e.target.value)}
@@ -458,8 +447,22 @@ export default function DemoPage() {
                     <input type="text" maxLength={64} placeholder="LOC-001" value={form.location_id} onChange={e => set("location_id", e.target.value)}
                       className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono" />
                   </div>
+                </div>}
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Memo (optional)</label>
+                  <input type="text" placeholder="Payment for services" value={form.narration}
+                    onChange={e => set("narration", e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500" />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <details className="border-t border-gray-100 pt-3">
+                  <summary className="cursor-pointer text-xs font-medium text-gray-500">Test details (optional)</summary>
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label htmlFor="holder-id" className="text-xs text-gray-400 mb-1 block">Account Holder ID</label>
+                      <input id="holder-id" type="text" placeholder="Customer or member identifier" value={form.account_holder_id} onChange={e => set("account_holder_id", e.target.value)} maxLength={64}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500 font-mono" />
+                    </div>
+                {isBranch && cashKind !== "NON_CASH" && <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-400 mb-1 block">Conductor ID</label>
                     <input type="text" maxLength={64} placeholder="ID or member no." value={form.conductor_id} onChange={e => set("conductor_id", e.target.value)}
@@ -470,13 +473,9 @@ export default function DemoPage() {
                     <input type="text" maxLength={200} placeholder="Person presenting cash" value={form.conductor_name} onChange={e => set("conductor_name", e.target.value)}
                       className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500" />
                   </div>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Narration (optional)</label>
-                  <input type="text" placeholder="Payment for services" value={form.narration}
-                    onChange={e => set("narration", e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500" />
-                </div>
+                </div>}
+                  </div>
+                </details>
               </div>
             </div>
 
@@ -516,17 +515,18 @@ export default function DemoPage() {
                 {[
                   { label: direction === "OUTWARD" ? "From" : "To", value: `${form.account_holder_name || "Source account"} · ${form.account_id}` },
                   { label: direction === "OUTWARD" ? "To" : "From", value: `${direction === "OUTWARD" ? form.beneficiary_name : form.sender_name} · ${direction === "OUTWARD" ? form.beneficiary_account : form.sender_account}` },
-                  { label: "Instrument", value: INSTRUMENTS.find(([value]) => value === form.transaction_instrument)?.[1] || form.transaction_instrument },
-                  { label: "Channel", value: form.channel },
-                  { label: "Branch / location", value: form.branch_id || form.location_id || "Not provided" },
-                  { label: "Business date", value: form.business_date },
-                  { label: "Conductor", value: form.conductor_name || form.conductor_id || "Not provided" },
-                  { label: "Narration", value: form.narration || "—" },
-                  { label: "Cash classification", value: form.cash_kind === "CASH" ? "Cash" : form.cash_kind === "NON_CASH" ? "Non-cash" : "Unknown" },
+                  { label: "Channel", value: form.channel === "OTHER" ? channel : channelLabel },
+                  ...(isBranch ? [
+                    { label: "Branch", value: form.branch_id || "Not provided" },
+                    ...(form.location_id ? [{ label: "Location", value: form.location_id }] : []),
+                    ...(cashKind !== "NON_CASH" && (form.conductor_name || form.conductor_id) ? [{ label: "Conductor", value: form.conductor_name || form.conductor_id }] : []),
+                  ] : []),
+                  { label: "Memo", value: form.narration || "—" },
+                  ...(supportsCash ? [{ label: "Payment method", value: cashKind === "CASH" ? "Cash" : cashKind === "NON_CASH" ? "Non-cash" : "Unknown" }] : []),
                 ].map(({ label, value }) => (
-                  <div key={label} className="flex justify-between items-start">
-                    <span className="text-gray-400 text-sm">{label}</span>
-                    <span className="text-gray-800 text-sm font-medium text-right max-w-[200px]">{value}</span>
+                  <div key={label} className="flex justify-between items-start gap-3">
+                    <span className="shrink-0 text-gray-400 text-sm">{label}</span>
+                    <span className="min-w-0 break-words text-gray-800 text-sm font-medium text-right max-w-[200px] [overflow-wrap:anywhere]">{value}</span>
                   </div>
                 ))}
                 <div className="h-px bg-gray-100 my-1" />
