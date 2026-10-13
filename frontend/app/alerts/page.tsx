@@ -2,11 +2,12 @@
 import { useEffect, useState } from "react";
 import { Search, X } from "lucide-react";
 import { api } from "@/lib/api";
-import type { FraudCaseListItem } from "@/types";
+import { useWebSocket } from "@/lib/useWebSocket";
+import type { FraudCaseListItem, WsNewCase } from "@/types";
 import Pagination from "@/components/Pagination";
 import { LoadError, RefreshButton, ReviewTable } from "@/components/ReviewUI";
 
-const defaults = { search: "", status: "", direction: "", flag: "", min_risk: "", sort: "risk" };
+const defaults = { search: "", status: "", direction: "", flag: "", min_risk: "", sort: "recent" };
 
 export default function AlertsPage() {
   const [filters, setFilters] = useState(defaults);
@@ -17,6 +18,16 @@ export default function AlertsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+
+  useWebSocket((data) => {
+    const message = data as Partial<WsNewCase>;
+    if (message.event !== "new_case") return;
+
+    setError("");
+    setLoading(true);
+    setPage(1);
+    setRefresh(current => current + 1);
+  });
 
   useEffect(() => {
     let active = true;
@@ -63,7 +74,7 @@ export default function AlertsPage() {
         <option value="">All scores</option><option value="31">Medium and above</option><option value="56">High and above</option><option value="76">Critical</option>
       </select></label>
       <label className="text-xs font-medium text-gray-600">Sort by<select className="review-input mt-1.5" value={filters.sort} onChange={e => change("sort", e.target.value)}>
-        <option value="risk">Highest risk</option><option value="recent">Newest first</option>
+        <option value="recent">Newest first</option><option value="risk">Highest risk</option>
       </select></label>
       <button className="review-icon" disabled={!filtered && !draft} onClick={reset} title="Reset filters" aria-label="Reset filters"><X size={16} /></button>
     </div>

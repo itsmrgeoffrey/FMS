@@ -4,7 +4,12 @@ import { auth } from "@/lib/api";
 
 export function useWebSocket(onMessage: (data: unknown) => void) {
   const wsRef = useRef<WebSocket | null>(null);
+  const onMessageRef = useRef(onMessage);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
 
   useEffect(() => {
     let stopped = false;
@@ -31,7 +36,7 @@ export function useWebSocket(onMessage: (data: unknown) => void) {
 
       ws.onmessage = (e) => {
         try {
-          onMessage(JSON.parse(e.data));
+          onMessageRef.current(JSON.parse(e.data));
         } catch {
           // ignore malformed messages
         }
@@ -52,5 +57,5 @@ export function useWebSocket(onMessage: (data: unknown) => void) {
       wsRef.current?.close();
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     };
-  }, [onMessage]);
+  }, []);
 }
