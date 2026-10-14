@@ -58,12 +58,13 @@ cd frontend && npm run dev
 
 ## 3. Roles and access
 
-| Capability | Admin | Analyst | Viewer |
-|---|:---:|:---:|:---:|
-| View dashboards, cases, reports | ✅ | ✅ | ✅ |
-| Act on cases (review / confirm / dismiss / escalate) | ✅ | ✅ | ❌ |
-| Use the transaction simulator | ✅ | ✅ | ❌ |
-| Administration (configuration, users) | ✅ | ❌ | ❌ |
+| Capability | Admin | Analyst/Inputter | Approver | Viewer |
+|---|:---:|:---:|:---:|:---:|
+| View dashboards, cases, reports | Yes | Yes | Yes | Yes |
+| Investigate standard cases and submit decisions | No | Yes | No | No |
+| Senior review and independent decision approvals | Yes | No | Yes | No |
+| Use the transaction simulator | Yes | Yes | No | No |
+| Administration (configuration, users) | Yes | No | No | No |
 
 Access is enforced by the server, not just hidden in the menu. Admins assign roles in **Administration → Users**. You cannot demote or disable your own account.
 
@@ -78,7 +79,7 @@ The sidebar is grouped into sections (click a bold header to collapse it):
 - **Analytics** — KPIs (value flagged, transactions processed, alerts today, open cases, false-positive rate among reviewed alerts) plus distribution charts. The false-positive rate shows "—" until alerts have actually been confirmed or dismissed.
 
 ### OPERATIONS
-- **Alerts** — the work queue: open cases ordered by risk, with OFAC/SAR/CTR badges. Start here each day.
+- **Alerts** — newest-first workflow queues: Review queue, Decision approvals, Escalations, and All open. Filters include inward/outward, reporting flag, risk, and status; highest-risk sorting remains available.
 - **Transactions** — every transaction the engine analyzed, filterable All / Flagged / Clean.
 - **Customers** — per-account rollup: volume, flagged counts, peak risk, sanctions/SAR flags.
 - **Cases** — all cases with status and confidence filters, and the case detail view (§5).
@@ -109,12 +110,14 @@ Open a case from **Alerts**, **Cases**, or the Dashboard's "Needs attention" lis
   - 🟡 **SAR RECOMMENDED** — suspicious activity meeting the SAR reporting bar, with the reason.
   - 🔵 **CTR REQUIRED** — a Currency Transaction Report obligation (this alone does not mean fraud).
 - **Fraud Risk Analysis** — the 0–100 risk score, the fraud typology (e.g., "multi-source smurfing", "invoice fraud"), and plain-English reasons for every signal that fired.
-- **Take Action** — with an optional note:
-  - **Mark Under Review** — you're investigating.
-  - **Confirm Fraud** — closes the case as confirmed.
-  - **Dismiss** — closes as a false positive (this feeds the false-positive KPI).
-  - **Escalate** — hands it up for senior review.
+- **Start review** claims the case under your named account and stores it as `UNDER_REVIEW`. Its assignment, review level and follow-up date appear in the case details.
+- **Submit fraud confirmation** or **Submit dismissal** requires a rationale and moves the case to Decision approvals. It remains open until a different Approver or Admin approves it.
+- **Approve** finalizes another reviewer's proposal. **Reject & return** requires a reason and returns it to that reviewer for further work. The person who submitted a proposal can withdraw it, but cannot approve it.
+- **Escalate to senior review** requires a reason and moves the case to Escalations. An Approver or Admin claims it there; a different checker must approve that senior reviewer's eventual disposition.
+- **Release to queue** removes your assignment; **Add review note** records investigation progress.
 - **Audit Trail** — every action on this case, by whom, when.
+
+In Alerts, select individual cases, a page, or all matching cases. Choose a bulk action and enter a shared rationale. The saved job processes cases in batches and shows success/failure counts; case ownership and independent approval are enforced for every item. Bulk submission cannot finalize an inputter's fraud or dismissal proposal. See [Case Workflow](CASE_WORKFLOW.md) for the complete process.
 
 Actions are attributed to your signed-in identity and recorded permanently. Viewers see cases read-only.
 
@@ -125,7 +128,7 @@ Actions are attributed to your signed-in identity and recorded permanently. View
 **Reports (SAR/STR)** has two tabs:
 
 - **SAR / STR** — every case where a Suspicious Activity Report is recommended, with the detection date, the **30-day filing deadline**, and days remaining (red when ≤ 7 days).
-- **CTR** — every transaction meeting the currency-transaction-reporting threshold, with the trigger (single transaction or same-day aggregate).
+- **CTR** — physical-cash reporting candidates under the configured US-bank USD baseline, with single-transaction or same-business-day aggregation triggers. Non-cash transfers do not enter this list by amount alone. Candidates require officer verification before filing; see [Cash Reporting](CASH_REPORTING.md).
 
 **Export CSV** downloads the current list. For FinCEN-shaped worksheets (Form 111 / Form 112 field structure, pre-filled from transaction data), call the API with `?format=fincen` — fields FMS cannot know (KYC identifiers) are explicitly listed for manual completion.
 
@@ -189,12 +192,14 @@ Shown locked ("Coming soon") — the built-in three-role model is active today; 
 
 Select Send (outward) or Receive (inward), enter the monitored account, amount and beneficiary or sender, then choose a Channel. Branch reveals branch and location fields. For a cash test, choose Branch and Payment method: Cash. Optional customer and cash-presenter identifiers are under Test details. FMS assigns the transaction time and derives the business date from the configured institution timezone. Review the details, then submit for assessment.
 
+Cash Test details also records whether the account holder acts for another beneficial owner and whether the cash purpose is payroll. A missing agent determination prevents exemption application. Administrators propose documented exemptions in Settings > CTR Exemptions; a different administrator reviews and approves in Settings > Approvals. Cash reporting evidence in case detail shows the linked totals and any exemption used. Full procedure: [Cash Reporting](CASH_REPORTING.md).
+
 Example test scenarios (results depend on the active rules and account history):
 
 | To trigger… | Send… |
 |---|---|
 | Cash / CTR review | A Branch cash deposit over $10,000 USD under the configured US bank profile. A non-cash wire does not qualify for cash CTR review merely because of its value. |
-| Cross-branch structuring alert | Two inward Branch cash deposits to the same account, such as $6,000 and $4,000 at different branch IDs on the same business day, with the behavioral benchmark set to $10,000 USD. |
+| Cross-branch structuring alert | Two inward Branch cash deposits, such as $6,000 each at different branch IDs on the same business day, sharing an account, stable holder ID, or stable conductor ID. Different accounts can be used when the shared ID is mapped. This $12,000 example also creates a nonexempt CTR candidate. |
 | Multi-source smurfing | 3–4 inward transfers from *different* senders to one account, each a few thousand dollars, within minutes |
 | Invoice-fraud pattern | A large outward transfer to a beneficiary the account has never paid |
 

@@ -70,6 +70,7 @@ function CaseDetail({ id }: { id: string }) {
           <section className="review-section"><h2 className="mb-5">Transaction details</h2>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Account" value={caseData.account_id} /><Field label={caseData.direction === "OUTWARD" ? "Beneficiary account" : "Sender account"} value={caseData.counterparty_account} /><Field label={caseData.direction === "OUTWARD" ? "Beneficiary name" : "Sender name"} value={caseData.counterparty_name} />
+              <Field label="Assigned reviewer" value={caseData.assigned_to} /><Field label="Review level" value={words(caseData.review_level)} /><Field label="Review due" value={caseData.review_due_at ? date(caseData.review_due_at) : null} />
               <Field label="Source" value={caseData.source_table} /><Field label="Source transaction ID" value={caseData.source_txn_id} /><Field label="Channel" value={caseData.channel} />
               <Field label="Transaction time (local)" value={date(caseData.timestamp)} /><Field label="Created (local)" value={date(caseData.created_at)} /><Field label="Reference" value={caseData.reference} />
               <Field label="Instrument" value={context?.transaction_instrument ? words(context.transaction_instrument) : null} /><Field label="Business date" value={assessment?.business_date} /><Field label="Cash classification" value={assessment?.cash_classification == null ? null : assessment.cash_classification ? "Cash" : "Non-cash"} />
@@ -91,6 +92,16 @@ function CaseDetail({ id }: { id: string }) {
               {!legacy && assessment?.screening_status === "NO_MATCH" && <p className="text-gray-600">No screening candidate was recorded at assessment time.</p>}
               {caseData.ctr_required && <div className="border-l-4 border-blue-400 bg-blue-50 p-4"><h3 className="font-semibold text-blue-900">CTR review</h3><p className="mt-2 break-words text-blue-800">{caseData.ctr_reason}</p><p className="mt-2 text-xs text-blue-700">Cash classification, business-day totals and exemptions require verification. This flag is separate from fraud suspicion.</p></div>}
               {caseData.sar_recommended && <div className="border-l-4 border-amber-400 bg-amber-50 p-4"><h3 className="font-semibold text-amber-900">SAR recommendation</h3><p className="mt-2 break-words text-amber-800">{caseData.sar_reason}</p><p className="mt-2 text-xs text-amber-800">Officer assessment is outstanding. This recommendation is not a filed report.</p></div>}
+              {assessment?.ctr_assessment?.groups && <details className="border-t border-gray-200 pt-3">
+                <summary className="cursor-pointer font-semibold text-gray-800">Cash reporting evidence</summary>
+                <p className="mt-3">Exemption: {words(assessment.ctr_assessment.exemption?.status)}</p>
+                {assessment.ctr_assessment.exemption?.id && <p className="break-words text-xs text-gray-500">Record {assessment.ctr_assessment.exemption.id}; approved by {assessment.ctr_assessment.exemption.approved_by}</p>}
+                {assessment.ctr_assessment.groups.map(group => <div key={`${group.basis}:${group.subject_id}`} className="mt-3 border-t border-gray-100 pt-3">
+                  <p className="break-words font-medium">{words(group.basis)}: {group.subject_id}</p>
+                  <p className="mt-1 text-xs">Gross USD {group.gross_total}; after exemptions USD {group.reportable_total}; {group.transaction_count} cash transactions</p>
+                  <ul className="mt-2 space-y-1 text-xs text-gray-500">{group.transactions.map(item => <li className="break-words" key={`${item.source}:${item.transaction_id}`}>{item.source} / {item.transaction_id} / Account {item.account_id}: USD {item.amount}{item.exemption_id ? `; exempt under ${item.exemption_id}, approved by ${item.approved_by}` : "; included in nonexempt total"}</li>)}</ul>
+                </div>)}
+              </details>}
               {!caseData.ctr_required && !caseData.sar_recommended && <p className="text-gray-600">No CTR or SAR flag recorded.</p>}
             </div>
           </section>

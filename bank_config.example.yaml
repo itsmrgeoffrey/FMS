@@ -59,6 +59,13 @@ tables:
       reference: payment_ref
       status: txn_status               # optional
       # batch_id: batch_id             # optional — set if your table flags payroll/batch runs
+      # is_cash: physical_cash         # explicit boolean; never inferred from channel
+      # account_holder_id: customer_id # consistent institution-wide holder ID across feeds/accounts
+      # conductor_id: presenter_id     # consistent presenter ID, never a name match
+      # branch_id: branch_code
+      # business_date: banking_day     # optional ISO date; otherwise business timezone is used
+      # acting_as_agent: agent_flag    # false only when holder acts for itself; unknown blocks exemption
+      # cash_purpose: cash_purpose     # PAYROLL or OTHER; payroll exemption covers payroll withdrawals only
 
   outward:
     # The same optional per-feed database block may be used here when outward

@@ -196,8 +196,12 @@ async def me(user: User = Depends(require_user)):
 CAPABILITY_LABELS: list[dict] = [
     {"key": "view", "label": "View",
      "description": "See dashboards, transactions, cases, reports and the audit trail"},
+    {"key": "simulate", "label": "Run simulator",
+     "description": "Submit controlled test transactions through the monitoring engine"},
     {"key": "act", "label": "Act on cases",
-     "description": "Dismiss, confirm, escalate and annotate cases"},
+     "description": "Investigate cases and submit proposed dispositions"},
+    {"key": "approve_case", "label": "Approve case decisions",
+     "description": "Approve or reject proposed dispositions and handle escalations"},
     {"key": "admin", "label": "Administer",
      "description": "Configure the system, manage users and approve sensitive changes"},
 ]

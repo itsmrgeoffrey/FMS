@@ -52,6 +52,8 @@ class NormalizedTransaction:
     location_id: str | None = None
     conductor_id: str | None = None
     conductor_name: str | None = None
+    acting_as_agent: bool | None = None
+    cash_purpose: str | None = None
 
     def __post_init__(self):
         self.amount = Decimal(str(self.amount))
@@ -66,10 +68,16 @@ class NormalizedTransaction:
             value = getattr(self, field)
             if value is not None:
                 setattr(self, field, str(value).strip() or None)
-        if self.is_cash is not None:
-            if str(self.is_cash).lower() not in ("true", "false", "0", "1"):
-                raise ValueError("is_cash must be an explicit boolean")
-            self.is_cash = str(self.is_cash).lower() in ("true", "1")
+        for field in ("is_cash", "acting_as_agent"):
+            value = getattr(self, field)
+            if value is not None:
+                if str(value).lower() not in ("true", "false", "0", "1"):
+                    raise ValueError(f"{field} must be an explicit boolean")
+                setattr(self, field, str(value).lower() in ("true", "1"))
+        if self.cash_purpose is not None:
+            self.cash_purpose = str(self.cash_purpose).strip().upper() or None
+            if self.cash_purpose not in (None, "PAYROLL", "OTHER"):
+                raise ValueError("cash_purpose must be PAYROLL or OTHER")
         if self.business_date:
             self.business_date = date.fromisoformat(str(self.business_date)).isoformat()
         if self.direction not in ("INWARD", "OUTWARD"):

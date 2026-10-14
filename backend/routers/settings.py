@@ -48,6 +48,7 @@ MAPPABLE_FIELDS = [
     "counterparty_name", "channel", "currency", "reference", "status", "batch_id",
     "account_holder_name", "account_holder_id", "is_cash", "business_date",
     "transaction_instrument", "branch_id", "location_id", "conductor_id", "conductor_name",
+    "acting_as_agent", "cash_purpose",
 ]
 
 _DATABASE_FIELDS = (

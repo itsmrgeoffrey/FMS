@@ -50,12 +50,16 @@ Outbound in both modes: optional **signed webhooks** — every delivery is HMAC-
 
 ## RBAC design
 
-| Capability | Admin | Analyst | Viewer |
-|---|---|---|---|
-| View dashboards, cases, reports, risk assessment | ✅ | ✅ | ✅ |
-| Act on cases (confirm / dismiss / escalate / note) | ✅ | ✅ | — |
-| Run 314(a) scans, access audit trail & security events | ✅ | — | — |
-| View and tune rules, run backtests, edit settings, manage users, edit/finalize risk assessments | ✅ | — | — |
+| Capability | Admin | Analyst/Inputter | Approver | Viewer |
+|---|---|---|---|---|
+| View dashboards, cases, reports, risk assessment | Yes | Yes | Yes | Yes |
+| Claim standard reviews, submit dispositions, escalate | No | Yes | No | No |
+| Claim senior reviews and independently approve/reject dispositions | Yes | No | Yes | No |
+| Run simulator | Yes | Yes | No | No |
+| Run 314(a) scans, access audit trail & security events | Yes | No | No | No |
+| View and tune rules, run backtests, edit settings, manage users, edit/finalize risk assessments | Yes | No | No | No |
+
+Case dispositions use separate `case_decisions` records. Confirming or dismissing submits a proposal and sets `PENDING_APPROVAL`; a different Approver or Admin must approve before closure. Rejection returns the case to its original reviewer. Escalation routes to a senior-review queue and clears the standard assignment. Senior reviewers also need a different checker for their proposals. `case_batches` stores selected case IDs and committed progress for resumable bulk work, with per-case authorization and failure counts. See [Case Workflow](CASE_WORKFLOW.md).
 
 Enforcement is in `backend/auth.py` dependencies (`require_user`, `require_admin`) applied per-router and per-endpoint. **Dual control (maker-checker):** when two or more active admins exist, sensitive admin changes (user creation, role changes, enable/disable, password resets of others, settings changes) queue as `pending_approvals` and execute only when a *different* admin approves; the requester can never approve their own change. Rule and operating-profile changes always require a different active admin, including single-admin installations. Other administrative bootstrap actions retain immediate application with fewer than two admins. The queue and pending count are in Settings > Approvals.
 

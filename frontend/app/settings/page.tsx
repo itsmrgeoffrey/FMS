@@ -6,6 +6,7 @@ import { LoadError, RefreshButton } from "@/components/ReviewUI";
 import { useRouter, useSearchParams } from "next/navigation";
 import RuleEngineSettings from "@/components/RuleEngineSettings";
 import InstallationSettings from "@/components/InstallationSettings";
+import CtrExemptions from "@/components/CtrExemptions";
 import { api, auth } from "@/lib/api";
 import type { Approval, ApprovalsPage } from "@/lib/api";
 import type { AuthUser, AuditEntry } from "@/types";
@@ -237,8 +238,9 @@ function UsersSection({ onChanged }: { onChanged: () => void }) {
           Create accounts, assign roles, reset passwords, and enable/disable users.
         </p>
         <p className="text-xs text-gray-400 mt-1">
-          <span className="font-medium text-gray-500">Admin</span> — full access ·{" "}
-          <span className="font-medium text-gray-500">Analyst</span> — view + act on cases ·{" "}
+          <span className="font-medium text-gray-500">Admin</span> — administration + case approvals ·{" "}
+          <span className="font-medium text-gray-500">Analyst</span> — investigate + submit decisions ·{" "}
+          <span className="font-medium text-gray-500">Approver</span> — senior review + approve decisions ·{" "}
           <span className="font-medium text-gray-500">Viewer</span> — read-only
         </p>
       </div>
@@ -258,6 +260,7 @@ function UsersSection({ onChanged }: { onChanged: () => void }) {
             >
               <option value="admin">Admin</option>
               <option value="analyst">Analyst</option>
+              <option value="approver">Approver</option>
               <option value="viewer">Viewer</option>
             </select>
           </div>
@@ -311,6 +314,7 @@ function UsersSection({ onChanged }: { onChanged: () => void }) {
                   >
                     <option value="admin">Admin</option>
                     <option value="analyst">Analyst</option>
+                    <option value="approver">Approver</option>
                     <option value="viewer">Viewer</option>
                   </select>
                 )}
@@ -425,7 +429,7 @@ function ApprovalsSection({
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
       {approvals.active_admins < 2 && <div role="status" className="border-l-4 border-amber-500 bg-amber-50 p-3 text-sm text-amber-900">
-        Only {approvals.active_admins} active administrator account(s). Rule and profile changes remain pending until a different active administrator approves.
+        Only {approvals.active_admins} active administrator account(s). Rules, profiles, and CTR exemptions require a different active administrator to approve.
         <Link href="/settings?tab=users" className="ml-1 font-medium underline">Manage administrators</Link>
       </div>}
       {approvals.pending.length === 0 ? (
@@ -453,6 +457,12 @@ function ApprovalsSection({
                     {a.configuration_proposal.initial_configuration_allowed && <p className="text-amber-800">Initial configuration without replay history is permitted by this proposal.</p>}
                     {a.configuration_proposal.stale && <p className="font-medium text-red-700">Outdated proposal. Cancel or reject it and request a new proposal.</p>}
                   </div>}
+                  {a.ctr_exemption_proposal && <dl className="mt-3 space-y-2 border-l-2 border-blue-300 pl-3 text-xs text-gray-700">
+                    {Object.entries(a.ctr_exemption_proposal).map(([key, value]) => <div key={key} className="break-words">
+                      <dt className="font-semibold capitalize">{key.replaceAll("_", " ")}</dt>
+                      <dd>{Array.isArray(value) ? value.join(", ") : String(value ?? "Not supplied")}</dd>
+                    </div>)}
+                  </dl>}
                 </div>
                 <div className="space-x-2 whitespace-nowrap">
                   {mine ? (
@@ -595,12 +605,13 @@ function RolesPermissions() {
   );
 }
 
-type AdminTab = "system" | "rules" | "approvals" | "installation" | "account" | "users" | "roles" | "directory" | "integrations";
+type AdminTab = "system" | "rules" | "approvals" | "exemptions" | "installation" | "account" | "users" | "roles" | "directory" | "integrations";
 
 const TABS: { key: AdminTab; label: string; adminOnly?: boolean }[] = [
   { key: "system", label: "System", adminOnly: true },
   { key: "rules", label: "Rule Engine", adminOnly: true },
   { key: "approvals", label: "Approvals", adminOnly: true },
+  { key: "exemptions", label: "CTR Exemptions", adminOnly: true },
   { key: "installation", label: "Installation", adminOnly: true },
   { key: "account", label: "My Account" },
   { key: "users", label: "Users", adminOnly: true },
@@ -862,6 +873,7 @@ function SettingsContent() {
       <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} tabIndex={0} className="space-y-6">
       {tab === "rules" && isAdmin && <RuleEngineSettings onSubmitted={refreshApprovals} />}
       {tab === "installation" && isAdmin && <InstallationSettings onSubmitted={refreshApprovals} />}
+      {tab === "exemptions" && isAdmin && <CtrExemptions onSubmitted={refreshApprovals} />}
       {tab === "approvals" && isAdmin && <div className="space-y-4">
         <div className="flex justify-end"><RefreshButton loading={approvalLoading} onClick={refreshApprovals} /></div>
         {approvalError && <LoadError message={approvalError} retry={refreshApprovals} />}

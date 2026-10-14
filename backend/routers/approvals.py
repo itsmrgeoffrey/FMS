@@ -46,7 +46,9 @@ class DecisionNote(BaseModel):
 def _approval_out(approval: PendingApproval) -> dict:
     result = ApprovalOut.model_validate(approval).model_dump()
     payload = json.loads(approval.payload)
-    if dual_control.requires_independent_approval(approval.action, payload):
+    if approval.action in {"CTR_EXEMPTION_CREATE", "CTR_EXEMPTION_REVOKE"}:
+        result["ctr_exemption_proposal"] = payload.get("exemption") or {"id": payload.get("id"), "reason": payload.get("reason")}
+    elif dual_control.requires_independent_approval(approval.action, payload):
         from backend.services.rule_governance import revision
         rules = payload.get("rules") is not None
         allowed = {"ctr_thresholds", "sar_ratio", "structuring_band_ratio", "rolling_window_days", "smurfing_window_hours"} if rules else {

@@ -4,8 +4,11 @@ from pydantic import BaseModel, field_serializer
 
 
 class UTCResponse(BaseModel):
-    @field_serializer("timestamp", "created_at", "updated_at", check_fields=False)
-    def serialize_time(self, value: datetime):
+    @field_serializer("timestamp", "created_at", "updated_at", "assigned_at", "review_due_at",
+        "requested_at", "decided_at", "completed_at", check_fields=False)
+    def serialize_time(self, value: datetime | None):
+        if value is None:
+            return None
         return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
 
 
@@ -16,6 +19,22 @@ class CaseActionOut(UTCResponse):
     actor: str
     note: str | None
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CaseDecisionOut(UTCResponse):
+    id: str
+    case_id: str
+    proposed_action: str
+    rationale: str
+    requested_by: str
+    requested_at: datetime
+    status: str
+    decided_by: str | None
+    decided_at: datetime | None
+    decision_note: str | None
+    batch_id: str | None
 
     model_config = {"from_attributes": True}
 
@@ -46,6 +65,11 @@ class FraudCaseOut(UTCResponse):
     reasons: list[str]
     ai_summary: str | None
     status: str
+    assigned_to: str | None = None
+    assigned_at: datetime | None = None
+    review_due_at: datetime | None = None
+    review_level: str = "STANDARD"
+    pending_decision: CaseDecisionOut | None = None
     created_at: datetime
     updated_at: datetime
     actions: list[CaseActionOut] = []
@@ -72,6 +96,10 @@ class FraudCaseListItem(UTCResponse):
     confidence: str
     fraud_type: str | None
     status: str
+    assigned_to: str | None = None
+    assigned_at: datetime | None = None
+    review_level: str = "STANDARD"
+    pending_decision: CaseDecisionOut | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

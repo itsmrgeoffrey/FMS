@@ -75,6 +75,8 @@ export default function DemoPage() {
     location_id: "",
     conductor_id: "",
     conductor_name: "",
+    acting_as_agent: "UNKNOWN",
+    cash_purpose: "OTHER",
   });
 
   useEffect(() => {
@@ -104,6 +106,8 @@ export default function DemoPage() {
       location_id: "",
       conductor_id: "",
       conductor_name: "",
+      acting_as_agent: "UNKNOWN",
+      cash_purpose: "OTHER",
     }));
     setLastReference("");
   }
@@ -169,6 +173,8 @@ export default function DemoPage() {
         account_holder_name: form.account_holder_name || undefined,
         account_holder_id: form.account_holder_id.trim() || undefined,
         is_cash: cashKind === "UNKNOWN" ? null : cashKind === "CASH",
+        acting_as_agent: cashKind === "CASH" && form.acting_as_agent !== "UNKNOWN" ? form.acting_as_agent === "YES" : null,
+        cash_purpose: cashKind === "CASH" ? form.cash_purpose : undefined,
         transaction_instrument: instrument,
         branch_id: isBranch ? form.branch_id.trim() || undefined : undefined,
         location_id: isBranch ? form.location_id.trim() || undefined : undefined,
@@ -457,6 +463,18 @@ export default function DemoPage() {
                 <details className="border-t border-gray-100 pt-3">
                   <summary className="cursor-pointer text-xs font-medium text-gray-500">Test details (optional)</summary>
                   <div className="mt-3 space-y-3">
+                    {cashKind === "CASH" && <>
+                      <label className="block text-xs text-gray-500">Account holder acting for another beneficial owner
+                        <select className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm" value={form.acting_as_agent} onChange={e => set("acting_as_agent", e.target.value)}>
+                          <option value="UNKNOWN">Not established</option><option value="NO">No, own behalf</option><option value="YES">Yes, acting as agent</option>
+                        </select>
+                      </label>
+                      <label className="block text-xs text-gray-500">Cash purpose
+                        <select className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm" value={form.cash_purpose} onChange={e => set("cash_purpose", e.target.value)}>
+                          <option value="OTHER">Other</option><option value="PAYROLL">Payroll</option>
+                        </select>
+                      </label>
+                    </>}
                     <div>
                       <label htmlFor="holder-id" className="text-xs text-gray-400 mb-1 block">Account Holder ID</label>
                       <input id="holder-id" type="text" placeholder="Customer or member identifier" value={form.account_holder_id} onChange={e => set("account_holder_id", e.target.value)} maxLength={64}

@@ -1,5 +1,12 @@
 # FMS Application Database Schema
 
+Cash-reporting additions: `cash_activity` is a rebuildable party/day index keyed by
+`transaction_processing.id`; exact transaction values remain in processing snapshots.
+`ctr_exemptions` stores approved holder/account scope, category, evidence and designation
+references, validity/review dates, maker/checker identities, and any revocation.
+Pending creations and revocations use `pending_approvals`. Completed assessments preserve
+their original cash-group evidence and exemption decision. See [Cash Reporting](CASH_REPORTING.md).
+
 The application datastore (SQLite by default; SQL Server/PostgreSQL via `FMS_APP_DB_URL`) holds FMS's own records — cases, users, audit, assessments. It is entirely separate from any institution transaction database, which FMS only ever reads (poll mode) or never touches (API mode). Source of truth: [`backend/models.py`](../backend/models.py); tables are created automatically at startup.
 
 ## fraud_cases — one row per flagged (or CTR-triggering) transaction
@@ -11,13 +18,19 @@ The compliance record at the center of everything. Unique on `(source_table, sou
 | Transaction | `account_id`, `amount`, `direction`, `timestamp`, `counterparty_account`, `counterparty_name`, `channel`, `currency`, `reference` | Normalized fields |
 | Analysis | `risk_score` (0–100), `confidence` (HIGH/MEDIUM/LOW), `fraud_type`, `reasons` (JSON — every signal with its numbers), `ai_summary` | Fully deterministic; `ai_summary` is prose only |
 | Obligations | `ctr_required` + `ctr_reason`, `sar_recommended` + `sar_reason`, `sanctions_hit` + `sanctions_detail` | The regulatory flags |
-| Workflow | `status` (OPEN / UNDER_REVIEW / CONFIRMED_FRAUD / DISMISSED / ESCALATED / CLEAN), `created_at`, `updated_at` | `created_at` = detection date for the SAR 30-day clock |
+| Workflow | `status` (OPEN / UNDER_REVIEW / PENDING_APPROVAL / CONFIRMED_FRAUD / DISMISSED / ESCALATED / CLEAN), `assigned_to`, `assigned_at`, `review_due_at`, `review_level`, `created_at`, `updated_at` | Assignment and internal review target are separate from the reporting assessment |
 
 ## case_actions — the disposition history
 Every analyst action on a case: `case_id` (FK), `action` (OPENED / DISMISSED / CONFIRMED / ESCALATED / REVIEW / NOTE_ADDED), `actor` (named user), `note`, `created_at`. Append-only in practice — dispositions are recorded, not rewritten.
 
+## case_decisions — independent disposition approval
+`id`, `case_id` (FK), `proposed_action` (CONFIRMED/DISMISSED), `rationale`, `requested_by`, `requested_at`, `status` (pending/approved/rejected/cancelled), `decided_by`, `decided_at`, `decision_note`, `batch_id`. Approval requires a checker other than the maker. Prior decisions remain recorded after rejection or withdrawal.
+
+## case_batches — durable bulk work
+`id`, `action`, `case_ids` (JSON snapshot), `rationale`, `requested_by`, `status`, `total`, `processed`, `succeeded`, `failed`, `errors` (up to 100 sampled failures), `created_at`, `completed_at`. Each committed 100-case chunk also commits progress, allowing restart recovery.
+
 ## users
-`id` (uuid), `username`, `email`, `full_name`, `password_hash` (PBKDF2-SHA256 — plaintext never stored), `role` (admin/analyst/viewer), `is_active`, `created_at`, `last_login_at`. LDAP/AD users are auto-provisioned here with directory-mapped roles.
+`id` (uuid), `username`, `email`, `full_name`, `password_hash` (PBKDF2-SHA256 — plaintext never stored), `role` (admin/analyst/approver/viewer), `is_active`, `created_at`, `last_login_at`. LDAP/AD users are auto-provisioned here with directory-mapped roles.
 
 ## audit_log — the examiner-facing trail
 `id`, `username`, `action` (catalog in [AUDIT_LOGGING.md](AUDIT_LOGGING.md)), `target` (case id / user / resource), `detail`, `ip`, `created_at`. Written best-effort on every sensitive action; never auto-purged.

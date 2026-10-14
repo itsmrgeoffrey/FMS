@@ -125,12 +125,14 @@ async def require_user(
 
 
 # ─── Role-based access control ───────────────────────────────────────────────
-# admin   — full access, including Administration (config + user management)
-# analyst — view everything + act on cases (dismiss/confirm/escalate/note)
-# viewer  — read-only: can view, cannot take actions or configure
+# admin    — administer + independently approve case decisions
+# analyst  — investigate cases and submit proposed dispositions
+# approver — independently approve/reject dispositions and handle escalations
+# viewer   — read-only
 ROLE_CAPABILITIES: dict[str, set[str]] = {
-    "admin": {"view", "act", "admin"},
-    "analyst": {"view", "act"},
+    "admin": {"view", "simulate", "approve_case", "admin"},
+    "analyst": {"view", "simulate", "act"},
+    "approver": {"view", "approve_case"},
     "viewer": {"view"},
 }
 VALID_ROLES = set(ROLE_CAPABILITIES)
@@ -148,9 +150,21 @@ async def require_admin(user: User = Depends(require_user)) -> User:
 
 
 async def require_case_action(user: User = Depends(require_user)) -> User:
-    """Require the 'act' capability — admins and analysts, not viewers."""
+    """Require the analyst/inputter case-action capability."""
     if not role_has(user.role, "act"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your role has read-only access")
+    return user
+
+
+async def require_simulation(user: User = Depends(require_user)) -> User:
+    if not role_has(user.role, "simulate"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Simulation access required")
+    return user
+
+
+async def require_case_approver(user: User = Depends(require_user)) -> User:
+    if not role_has(user.role, "approve_case"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Case approver access required")
     return user
 
 

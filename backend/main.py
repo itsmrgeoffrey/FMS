@@ -13,9 +13,9 @@ from fastapi.responses import JSONResponse
 from backend.config import settings as app_settings, CORS_ORIGINS
 from backend.database import init_db
 from backend.logging_config import request_id_var, setup_logging
-from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest, risk
+from backend.routers import approvals, cases, stats, ws, transactions, reports, audit, auth_routes, insights, ingest, risk, ctr_exemptions
 from backend.routers import settings as settings_routes, metrics as metrics_routes
-from backend.services import poller, sanctions, metrics, delivery
+from backend.services import poller, sanctions, metrics, delivery, case_workflow
 
 # Configure logging before anything else emits records (env-controlled level and
 # an optional rotating file — see backend/logging_config.py).
@@ -115,17 +115,21 @@ async def lifespan(app: FastAPI):
     from backend.services.rule_governance import restore_latest
     async with SessionLocal() as db:
         await restore_latest(db)
+    from backend.services.cash_history import backfill
+    async with SessionLocal() as db:
+        await backfill(db)
     poll_task = asyncio.create_task(poller.poll_loop())
     ofac_task = asyncio.create_task(_ofac_refresh_loop())
     retention_task = asyncio.create_task(_retention_loop())
     flush_task = asyncio.create_task(_metrics_flush_loop())
     recovery_task = asyncio.create_task(delivery.recovery_loop())
+    case_batch_task = asyncio.create_task(case_workflow.batch_loop())
     yield
     try:
         await metrics.flush()  # persist any buffered counts on shutdown
     except Exception:
         pass
-    for task in (poll_task, ofac_task, retention_task, flush_task, recovery_task):
+    for task in (poll_task, ofac_task, retention_task, flush_task, recovery_task, case_batch_task):
         task.cancel()
         try:
             await task
@@ -256,3 +260,4 @@ app.include_router(ingest.router)
 app.include_router(approvals.router)
 app.include_router(risk.router)
 app.include_router(metrics_routes.router)
+app.include_router(ctr_exemptions.router)

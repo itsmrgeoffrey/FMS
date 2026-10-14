@@ -1,6 +1,6 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import String, Float, DateTime, Text, Integer, ForeignKey, JSON, Boolean, UniqueConstraint
+from datetime import date, datetime
+from sqlalchemy import String, Float, Date, DateTime, Text, Integer, ForeignKey, JSON, Boolean, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
 
@@ -48,11 +48,18 @@ class FraudCase(Base):
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # case management
     status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    review_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    review_level: Mapped[str] = mapped_column(String(20), default="STANDARD", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     actions: Mapped[list["CaseAction"]] = relationship(
         "CaseAction", back_populates="case", order_by="CaseAction.created_at"
+    )
+    decisions: Mapped[list["CaseDecision"]] = relationship(
+        "CaseDecision", back_populates="case", order_by="CaseDecision.requested_at", lazy="selectin"
     )
     processing_record: Mapped["TransactionProcessing | None"] = relationship(lazy="selectin", uselist=False)
 
@@ -61,6 +68,10 @@ class FraudCase(Base):
         return self.processing_record.assessment if self.processing_record else {
             "version": "legacy", "regulatory_status": "REASSESSMENT_REQUIRED",
             "screening_status": "LEGACY_UNVERIFIED", "reporting_status": "NOT_ASSESSED"}
+
+    @property
+    def pending_decision(self):
+        return next((decision for decision in reversed(self.decisions) if decision.status == "pending"), None)
 
 
 class TransactionProcessing(Base):
@@ -91,6 +102,42 @@ class NotificationDelivery(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CashActivity(Base):
+    """Indexed party/day lookup into exact processing snapshots."""
+    __tablename__ = "cash_activity"
+    processing_id: Mapped[str] = mapped_column(String(36), ForeignKey("transaction_processing.id"), primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    account_holder_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    conductor_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    business_date: Mapped[str] = mapped_column(String(10), index=True)
+    currency: Mapped[str] = mapped_column(String(10))
+    direction: Mapped[str] = mapped_column(String(10))
+    timestamp: Mapped[datetime] = mapped_column(DateTime)
+
+
+class CtrExemption(Base):
+    __tablename__ = "ctr_exemptions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    subject_id: Mapped[str] = mapped_column(String(64), index=True)
+    subject_name: Mapped[str] = mapped_column(String(200))
+    exemption_type: Mapped[str] = mapped_column(String(40))
+    account_ids: Mapped[list] = mapped_column(JSON)
+    effective_from: Mapped[date] = mapped_column(Date)
+    expires_on: Mapped[date] = mapped_column(Date)
+    reviewed_on: Mapped[date] = mapped_column(Date)
+    review_due: Mapped[date] = mapped_column(Date)
+    eligibility_basis: Mapped[str] = mapped_column(Text)
+    evidence_reference: Mapped[str] = mapped_column(String(255))
+    designation_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="ACTIVE", index=True)
+    created_by: Mapped[str] = mapped_column(String(150))
+    approved_by: Mapped[str] = mapped_column(String(150))
+    approved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    revoked_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class RevokedSession(Base):
     __tablename__ = "revoked_sessions"
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -110,6 +157,44 @@ class CaseAction(Base):
     case: Mapped["FraudCase"] = relationship("FraudCase", back_populates="actions")
 
 
+class CaseDecision(Base):
+    """A proposed final disposition awaiting an independent checker."""
+    __tablename__ = "case_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("fraud_cases.id"), index=True)
+    proposed_action: Mapped[str] = mapped_column(String(20))  # CONFIRMED / DISMISSED
+    rationale: Mapped[str] = mapped_column(Text)
+    requested_by: Mapped[str] = mapped_column(String(150), index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)
+    decided_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    batch_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+
+    case: Mapped["FraudCase"] = relationship("FraudCase", back_populates="decisions")
+
+
+class CaseBatch(Base):
+    """Durable server-side bulk work; case IDs are snapshotted at submission."""
+    __tablename__ = "case_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    action: Mapped[str] = mapped_column(String(20))
+    case_ids: Mapped[list] = mapped_column(JSON, default=list)
+    rationale: Mapped[str] = mapped_column(Text)
+    requested_by: Mapped[str] = mapped_column(String(150), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    processed: Mapped[int] = mapped_column(Integer, default=0)
+    succeeded: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -118,7 +203,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(150), unique=True, index=True, nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(20), default="analyst")  # admin / analyst / viewer
+    role: Mapped[str] = mapped_column(String(20), default="analyst")  # admin / analyst / approver / viewer
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Set when an admin issues a temporary password. Until the user chooses their
     # own, the temp credential is known to whoever issued (and emailed) it, so the

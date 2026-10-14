@@ -64,6 +64,10 @@ _ADDED_COLUMNS = {
         ("sar_reason", "TEXT"),
         ("sanctions_hit", "BOOLEAN DEFAULT 0"),
         ("sanctions_detail", "TEXT"),
+        ("assigned_to", "VARCHAR(150)"),
+        ("assigned_at", "DATETIME"),
+        ("review_due_at", "DATETIME"),
+        ("review_level", "VARCHAR(20) DEFAULT 'STANDARD'"),
     ],
     "users": [
         ("email", "TEXT"),
@@ -76,6 +80,7 @@ _ADDED_COLUMNS = {
 # columns when it creates the table, so a server database that predates a column
 # needs the same retrofit an existing SQLite file does.
 _MSSQL_TYPES = {"BOOLEAN": "BIT", "TEXT": "NVARCHAR(MAX)"}
+_POSTGRES_TYPES = {"DATETIME": "TIMESTAMP"}
 
 
 def _mssql_ddl(ddl: str) -> str:
@@ -96,7 +101,7 @@ async def _add_missing_columns(conn) -> None:
     from sqlalchemy import inspect as sa_inspect
 
     dialect = conn.dialect.name
-    if dialect not in ("sqlite", "mssql"):
+    if dialect not in ("sqlite", "mssql", "postgresql", "mysql"):
         return  # unknown dialect: leave the schema alone rather than guess
 
     def _columns(sync_conn, table: str) -> set[str]:
@@ -114,8 +119,17 @@ async def _add_missing_columns(conn) -> None:
                 continue
             if dialect == "sqlite":
                 stmt = f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"
-            else:
+            elif dialect == "mssql":
                 stmt = f"ALTER TABLE {table} ADD {name} {_mssql_ddl(ddl)}"
+            elif dialect == "postgresql":
+                parts = ddl.split(" ", 1)
+                suffix = " " + parts[1] if len(parts) > 1 else ""
+                if parts[0].upper() == "BOOLEAN" and suffix == " DEFAULT 0":
+                    suffix = " DEFAULT FALSE"
+                translated = _POSTGRES_TYPES.get(parts[0].upper(), parts[0]) + suffix
+                stmt = f"ALTER TABLE {table} ADD COLUMN {name} {translated}"
+            else:
+                stmt = f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"
             try:
                 await conn.exec_driver_sql(stmt)
                 log.info(f"Migration: added {table}.{name}")
@@ -126,6 +140,10 @@ async def _add_missing_columns(conn) -> None:
 async def _run_migrations(conn) -> None:
     # Column retrofits run on every supported dialect.
     await _add_missing_columns(conn)
+    await conn.exec_driver_sql(
+        "UPDATE fraud_cases SET review_level = 'SENIOR' "
+        "WHERE status = 'ESCALATED' AND (review_level IS NULL OR review_level = 'STANDARD')"
+    )
 
     # The index retrofits below use SQLite-only syntax ("IF NOT EXISTS"), and a
     # server database gets these constraints from create_all(), so stop here.

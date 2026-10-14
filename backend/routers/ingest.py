@@ -1,12 +1,13 @@
 """Authenticated entry points into the shared transaction processor."""
 import hmac
 from datetime import datetime, date
+from typing import Literal
 from decimal import Decimal
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.adapters.base import NormalizedTransaction
-from backend.auth import require_case_action, require_admin
+from backend.auth import require_admin, require_simulation
 from backend.config import settings
 from backend.database import get_db
 from backend.models import User, TransactionProcessing, NotificationDelivery
@@ -47,6 +48,8 @@ class TxnIn(BaseModel):
     location_id: str | None = Field(None, max_length=64)
     conductor_id: str | None = Field(None, max_length=64)
     conductor_name: str | None = Field(None, max_length=200)
+    acting_as_agent: bool | None = None
+    cash_purpose: Literal["PAYROLL", "OTHER"] | None = None
 
     @field_validator("external_id", "account_id")
     @classmethod
@@ -70,7 +73,8 @@ async def run_ingest(body: TxnIn, db: AsyncSession) -> dict:
         business_date=body.business_date.isoformat() if body.business_date else None,
         transaction_instrument=body.transaction_instrument, branch_id=body.branch_id,
         location_id=body.location_id, conductor_id=body.conductor_id,
-        conductor_name=body.conductor_name)
+        conductor_name=body.conductor_name, acting_as_agent=body.acting_as_agent,
+        cash_purpose=body.cash_purpose)
     return await processing.process(txn, timestamp_supplied=body.timestamp is not None)
 
 
@@ -81,7 +85,7 @@ async def ingest_transaction(body: TxnIn, db: AsyncSession = Depends(get_db)):
 
 @router.post("/simulate")
 async def simulate(body: TxnIn, db: AsyncSession = Depends(get_db),
-                   user: User = Depends(require_case_action)):
+                   user: User = Depends(require_simulation)):
     return await run_ingest(body, db)
 
 

@@ -50,6 +50,8 @@ def from_row(row):
         location_id=getattr(row, "location_id", None),
         conductor_id=getattr(row, "conductor_id", None),
         conductor_name=getattr(row, "conductor_name", None),
+        acting_as_agent=getattr(row, "acting_as_agent", None),
+        cash_purpose=getattr(row, "cash_purpose", None),
     )
 
 
@@ -67,7 +69,11 @@ def verdict(case, assessment=None, duplicate=False):
 
 @asynccontextmanager
 async def transaction_lock(txn):
-    indices = sorted({hash(txn.account_id) % len(_locks), hash((txn.source_table, txn.id)) % len(_locks)})
+    keys = [("account", txn.account_id), ("transaction", txn.source_table, txn.id)]
+    if txn.is_cash is True:
+        keys.extend((role, value) for role, value in (
+            ("holder", txn.account_holder_id), ("conductor", txn.conductor_id)) if value)
+    indices = sorted({hash(key) % len(_locks) for key in keys})
     async with AsyncExitStack() as stack:
         for index in indices:
             await stack.enter_async_context(_locks[index])
@@ -139,7 +145,15 @@ async def process(txn, supplied_history=(), timestamp_supplied=True):
                 for r in records:
                     h = deserialize(r.payload)
                     history[(h.source_table, h.id)] = h
-            result = await analyzer.analyze(txn, list(history.values()))
+                from backend.services import cash_history
+                from backend.routers.ctr_exemptions import records_for
+                if txn.is_cash is True:
+                    related = await cash_history.snapshots(db, txn)
+                    later = later or any(h.timestamp > txn.timestamp for h in related)
+                    for h in related:
+                        history[(h.source_table, h.id)] = h
+                exemptions = await records_for(db, {h.account_holder_id for h in [txn, *history.values()] if h.account_holder_id}) if txn.is_cash is True else []
+            result = await analyzer.analyze(txn, list(history.values()), exemptions)
             if later:
                 result.regulatory_review = True
                 result.reasons.insert(0, "Late-arriving transaction: review affected daily totals and subsequent assessments; later activity was excluded from this historical risk score.")
@@ -153,6 +167,7 @@ async def process(txn, supplied_history=(), timestamp_supplied=True):
                 "rules": result.assessed_rules, "cash_classification": txn.is_cash,
                 "business_date": analyzer.business_day(txn),
                 "structuring_alert": result.structuring_alert,
+                "ctr_assessment": result.ctr_assessment,
                 "transaction_context": {
                     "account_holder_id": txn.account_holder_id,
                     "account_holder_name": txn.account_holder_name,
@@ -161,6 +176,8 @@ async def process(txn, supplied_history=(), timestamp_supplied=True):
                     "location_id": txn.location_id,
                     "conductor_id": txn.conductor_id,
                     "conductor_name": txn.conductor_name,
+                    "acting_as_agent": txn.acting_as_agent,
+                    "cash_purpose": txn.cash_purpose,
                 },
                 "late_arrival": later,
             }
@@ -180,6 +197,8 @@ async def process(txn, supplied_history=(), timestamp_supplied=True):
                 record = await db.get(TransactionProcessing, record_id)
                 record.state, record.case_id, record.assessment = "COMPLETED", case.id, assessment
                 record.updated_at = datetime.utcnow()
+                if txn.is_cash is True:
+                    db.add(cash_history.activity(txn, record_id))
                 if txn.source_table == "api":
                     raw = (await db.execute(select(IngestedTransaction).where(IngestedTransaction.external_id == txn.id))).scalar_one_or_none()
                     if not raw:

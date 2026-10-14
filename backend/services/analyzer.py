@@ -254,6 +254,7 @@ class CTRAssessment:
     required: bool
     reason: str               # human-readable explanation
     trigger: str              # SINGLE_TXN / SAME_DAY_AGGREGATE / NONE
+    details: dict | None = None
 
 
 @dataclass
@@ -287,6 +288,7 @@ class FraudAnalysis:
     regulatory_review: bool = False
     structuring_alert: bool = False
     assessed_rules: dict | None = None
+    ctr_assessment: dict | None = None
 
 
 def initial_case_status(is_fraudulent: bool, ctr_required: bool, sar_recommended: bool,
@@ -322,6 +324,7 @@ def _assess_ctr(
     txn: NormalizedTransaction,
     history: list[NormalizedTransaction],
     threshold: float,
+    exemptions=(),
 ) -> CTRAssessment:
     if not supported_reporting(txn):
         return CTRAssessment(False, "Manual reporting assessment required: only US-bank USD rules are supported; no FX conversion or foreign reporting rule is inferred.", "MANUAL_REVIEW")
@@ -329,33 +332,19 @@ def _assess_ctr(
         return CTRAssessment(False, "Non-cash transaction: outside the cash CTR assessment.", "NONE")
     if txn.is_cash is None:
         return CTRAssessment(False, "Cash classification missing: verify reporting applicability manually.", "MANUAL_REVIEW")
-    threshold = Decimal("10000")
-    if txn.amount > threshold:
-        return CTRAssessment(
-            required=True,
-            reason=f"Cash transaction of USD {txn.amount:,.2f} exceeds $10,000. Verify exemptions and related-person aggregation before filing.",
-            trigger="SINGLE_TXN",
-        )
-
-    today = business_day(txn)
-    if today:
-        same_day = [
-            h for h in eligible_history(txn, history)
-            if h.is_cash is True and business_day(h) == today
-            and h.direction == txn.direction
-        ]
-        day_total = sum((h.amount for h in same_day), Decimal(0)) + txn.amount
-        if day_total > threshold:
-            return CTRAssessment(
-                required=True,
-                reason=(
-                    f"Same-direction cash business-day aggregate: USD {day_total:,.2f} "
-                    f"across {len(same_day) + 1} transactions. Verify exemptions and related-person aggregation before filing."
-                ),
-                trigger="SAME_DAY_AGGREGATE",
-            )
-
-    return CTRAssessment(required=False, reason="", trigger="NONE")
+    from backend.services.cash_reporting import assess_cash
+    details = assess_cash(txn, history, exemptions, business_day)
+    group = details["triggered_group"]
+    if group:
+        single = txn.amount > Decimal("10000") and details["exemption"]["status"] != "APPLIED"
+        return CTRAssessment(True,
+            f"Same-direction cash business-day aggregate for {group['basis']} {group['subject_id']}: "
+            f"USD {Decimal(group['reportable_total']):,.2f} exceeds $10,000 after recorded exemptions. "
+            "CTR candidate; an officer must verify reporting applicability before filing.",
+            "SINGLE_TXN" if single else "SAME_DAY_AGGREGATE", details)
+    if details["exemption"]["status"] == "APPLIED":
+        return CTRAssessment(False, "Approved CTR exemption applied within its recorded scope. Suspicious-activity monitoring remains active.", "EXEMPT", details)
+    return CTRAssessment(False, "", "NONE", details)
 
 
 # ─── SAR obligation assessment ────────────────────────────────────────────────
@@ -383,6 +372,7 @@ def _assess_sar(
         txn.amount,
         risk.rolling_5d_total if risk.rolling_5d_count > 1 else 0.0,
         risk.inbound_total_48h,
+        risk.components.get("cross_branch_structuring", {}).get("aggregate", 0),
     )
     if involved >= sar_threshold:
         return True, (
@@ -477,6 +467,7 @@ def _compute_risk_score(
     history: list[NormalizedTransaction],
     profile: BehavioralProfile,
     threshold: float,
+    cash_history=None,
 ) -> RiskScoreResult:
     history = eligible_history(txn, history)
     score = 0
@@ -497,20 +488,20 @@ def _compute_risk_score(
     if txn.is_cash is True and current_location:
         today = business_day(txn)
         benchmark = Decimal(str(threshold))
-        prior_cash = [
-            h for h in history
-            if h.is_cash is True
-            and h.direction == txn.direction
-            and business_day(h) == today
-            and (h.branch_id or h.location_id)
-            and h.amount <= benchmark
-        ]
-        cash_items = prior_cash + [txn]
-        locations = {h.branch_id or h.location_id for h in cash_items}
-        cash_total = sum((h.amount for h in cash_items), Decimal(0))
-        if txn.amount <= benchmark and len(cash_items) >= 2 and len(locations) >= 2 and cash_total >= benchmark:
+        from backend.services.cash_reporting import cash_groups
+        candidates = []
+        for group in cash_groups(txn, history if cash_history is None else cash_history, business_day):
+            items = [h for h in group["items"] if (h.branch_id or h.location_id) and h.amount <= benchmark]
+            locations = {h.branch_id or h.location_id for h in items}
+            total = sum((h.amount for h in items), Decimal(0))
+            if txn.amount <= benchmark and len(items) >= 2 and len(locations) >= 2 and total >= benchmark:
+                candidates.append((total, group, items, locations))
+        if candidates:
+            cash_total, group, cash_items, locations = max(candidates, key=lambda item: item[0])
             components["cross_branch_structuring"] = {
                 "score": 35,
+                "basis": group["basis"],
+                "subject_id": group["subject_id"],
                 "transaction_count": len(cash_items),
                 "location_count": len(locations),
                 "aggregate": float(cash_total),
@@ -892,12 +883,13 @@ _HARD_FRAUD_SIGNALS = frozenset(
 )
 
 
-def evaluate(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> dict:
+def evaluate(txn: NormalizedTransaction, history: list[NormalizedTransaction], exemptions=()) -> dict:
+    cash_history = history
     history = eligible_history(txn, history)
     threshold = _ctr_threshold(txn.currency)
     profile = _compute_behavioral_profile(history, threshold, txn.timestamp)
-    ctr = _assess_ctr(txn, history, threshold)
-    risk = _compute_risk_score(txn, history, profile, threshold)
+    ctr = _assess_ctr(txn, cash_history, threshold, exemptions)
+    risk = _compute_risk_score(txn, history, profile, threshold, cash_history)
 
     has_hard_signal = bool(_HARD_FRAUD_SIGNALS & risk.components.keys())
     if risk.level == "LOW" and not has_hard_signal:
@@ -917,10 +909,10 @@ def evaluate(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -
 
 # ─── Main entry point ─────────────────────────────────────────────────────────
 
-async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransaction]) -> FraudAnalysis:
+async def analyze(txn: NormalizedTransaction, history: list[NormalizedTransaction], exemptions=()) -> FraudAnalysis:
     from backend.services.installation import profile as operating_profile
     assessed_rules = {**snapshot_rules(), "operating_profile": operating_profile()}
-    verdict = evaluate(txn, history)
+    verdict = evaluate(txn, history, exemptions)
     threshold, profile, ctr, risk = verdict["threshold"], verdict["profile"], verdict["ctr"], verdict["risk"]
     is_fraudulent, confidence = verdict["is_fraudulent"], verdict["confidence"]
     sar_recommended, sar_reason = verdict["sar_recommended"], verdict["sar_reason"]
@@ -1060,6 +1052,7 @@ Respond with ONLY this JSON:
         screening_matches=matches,
         regulatory_review=regulatory_review,
         structuring_alert="cross_branch_structuring" in risk.components,
+        ctr_assessment={"trigger": ctr.trigger, **(ctr.details or {})},
         assessed_rules=assessed_rules,
     )
 

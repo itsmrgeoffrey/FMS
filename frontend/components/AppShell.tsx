@@ -45,7 +45,7 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
   { section: "Administration", requires: "admin", items: [
     { href: "/settings", label: "Settings", d: ICONS.admin },
   ] },
-  { section: "Tools", requires: "act", items: [
+  { section: "Tools", requires: "simulate", items: [
     { href: "/demo", label: "Simulate (Demo)", d: ICONS.demo },
   ] },
   { section: "Resources", items: [
@@ -55,8 +55,9 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
 ];
 
 const ROLE_CAPS: Record<string, string[]> = {
-  admin: ["view", "act", "admin"],
-  analyst: ["view", "act"],
+  admin: ["view", "simulate", "approve_case", "admin"],
+  analyst: ["view", "simulate", "act"],
+  approver: ["view", "approve_case"],
   viewer: ["view"],
 };
 function can(role: string | undefined, cap: string): boolean {

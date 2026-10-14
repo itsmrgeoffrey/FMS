@@ -88,6 +88,8 @@ class MySQLAdapter(BaseAdapter):
             location_id=str(get("location_id") or "") or None,
             conductor_id=str(get("conductor_id") or "") or None,
             conductor_name=str(get("conductor_name") or "") or None,
+            acting_as_agent=get("acting_as_agent"),
+            cash_purpose=str(get("cash_purpose") or "") or None,
         )
 
     async def fetch_new_transactions(

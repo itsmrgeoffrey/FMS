@@ -8,11 +8,12 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from backend.adapters.base import NormalizedTransaction
 from backend.database import Base
-from backend.models import FraudCase, TransactionProcessing, NotificationDelivery, IngestedTransaction, User, RevokedSession
-from backend.services import analyzer as A, processing as P, delivery as D, sanctions, callbacks
+from backend.models import CaseBatch, CaseDecision, FraudCase, TransactionProcessing, NotificationDelivery, IngestedTransaction, User, RevokedSession
+from backend.services import analyzer as A, processing as P, delivery as D, sanctions, callbacks, case_workflow as W
 from backend.auth import create_token, authenticate_token, hash_password
 
 NOW = datetime(2026, 10, 6, 12)
@@ -35,6 +36,7 @@ def store(tmp_path, monkeypatch):
     asyncio.run(create())
     monkeypatch.setattr(P, "SessionLocal", factory)
     monkeypatch.setattr(D, "SessionLocal", factory)
+    monkeypatch.setattr(W, "SessionLocal", factory)
     monkeypatch.setattr(P, "_locks", [asyncio.Lock() for _ in range(256)])
     monkeypatch.setattr(sanctions, "screen", lambda name: None)
     monkeypatch.setattr(sanctions, "has_full_list", lambda: True)
@@ -83,6 +85,122 @@ def test_processing_preserves_context_and_returns_structuring_alert(store):
         assert result["assessment"]["transaction_context"]["branch_id"] == "BR-002"
         assert result["assessment"]["transaction_context"]["conductor_id"] == "PERSON-1"
         assert not result["ctr_required"]
+
+    asyncio.run(run())
+
+
+def test_case_dispositions_require_independent_approval(store):
+    async def load(db, case_id):
+        return (await db.execute(select(FraudCase).where(FraudCase.id == case_id)
+            .options(selectinload(FraudCase.actions), selectinload(FraudCase.decisions)))).scalar_one()
+
+    async def run():
+        result = await P.process(txn(id="workflow", amount="10000.01"))
+        analyst = User(username="inputter", password_hash="unused", role="analyst")
+        approver = User(username="checker", password_hash="unused", role="approver")
+        admin = User(username="administrator", password_hash="unused", role="admin")
+        async with store() as db:
+            db.add_all([analyst, approver, admin]); await db.commit()
+            case = await load(db, result["case_id"])
+            with pytest.raises(HTTPException) as exc:
+                await W.apply_action(db, case, admin, "REVIEW", None)
+            assert exc.value.status_code == 403
+            await W.apply_action(db, case, analyst, "REVIEW", None)
+            await db.commit()
+            assert case.status == "UNDER_REVIEW" and case.assigned_to == analyst.username
+
+        async with store() as db:
+            case = await load(db, result["case_id"])
+            proposal = await W.apply_action(db, case, analyst, "CONFIRMED", "Documented fraud indicators")
+            await db.commit()
+            assert proposal and case.status == "PENDING_APPROVAL"
+
+        async with store() as db:
+            case = await load(db, result["case_id"])
+            await W.decide(db, case, approver, False, "Need source-document verification")
+            await db.commit()
+            assert case.status == "UNDER_REVIEW" and case.assigned_to == analyst.username
+
+        async with store() as db:
+            case = await load(db, result["case_id"])
+            await W.apply_action(db, case, analyst, "CONFIRMED", "Source documents verified")
+            await db.commit()
+
+        async with store() as db:
+            case = await load(db, result["case_id"])
+            await W.decide(db, case, admin, True, "Independent approval complete")
+            await db.commit()
+            assert case.status == "CONFIRMED_FRAUD" and case.assigned_to is None
+            assert case.pending_decision is None
+
+    asyncio.run(run())
+
+
+def test_escalation_routes_to_senior_review_and_still_needs_second_checker(store):
+    async def load(db, case_id):
+        return (await db.execute(select(FraudCase).where(FraudCase.id == case_id)
+            .options(selectinload(FraudCase.actions), selectinload(FraudCase.decisions)))).scalar_one()
+
+    async def run():
+        result = await P.process(txn(id="senior", amount="10000.01"))
+        analyst = User(username="inputter", password_hash="unused", role="analyst")
+        first = User(username="senior-one", password_hash="unused", role="approver")
+        second = User(username="senior-two", password_hash="unused", role="approver")
+        async with store() as db:
+            db.add_all([analyst, first, second]); await db.commit()
+            case = await load(db, result["case_id"])
+            await W.apply_action(db, case, analyst, "ESCALATED", "Senior authority required")
+            await db.commit()
+            assert case.status == "ESCALATED" and case.review_level == "SENIOR" and case.assigned_to is None
+
+        async with store() as db:
+            case = await load(db, result["case_id"])
+            await W.apply_action(db, case, first, "REVIEW", None)
+            await W.apply_action(db, case, first, "CONFIRMED", "Senior review supports fraud")
+            await db.commit()
+
+        async with store() as db:
+            case = await load(db, result["case_id"])
+            with pytest.raises(HTTPException) as exc:
+                await W.decide(db, case, first, True, None)
+            assert exc.value.status_code == 403
+            await W.decide(db, case, second, True, None)
+            await db.commit()
+            assert case.status == "CONFIRMED_FRAUD"
+
+    asyncio.run(run())
+
+
+def test_bulk_work_resumes_from_durable_progress(store):
+    async def run():
+        results = [await P.process(txn(id=f"bulk-{index}", amount="10000.01")) for index in range(3)]
+        case_ids = [result["case_id"] for result in results]
+        analyst = User(username="bulk-inputter", password_hash="unused", role="analyst")
+        async with store() as db:
+            db.add(analyst)
+            cases = (await db.execute(select(FraudCase).where(FraudCase.id.in_(case_ids))
+                .options(selectinload(FraudCase.actions), selectinload(FraudCase.decisions)))).scalars().all()
+            for case in cases:
+                await W.apply_action(db, case, analyst, "REVIEW", None)
+            batch = CaseBatch(action="CONFIRMED", case_ids=case_ids,
+                rationale="Shared documented indicators", requested_by=analyst.username,
+                total=3, processed=1, succeeded=1, status="RUNNING")
+            db.add(batch)
+            await db.commit()
+            batch_id = batch.id
+
+        await W._run_batch(batch_id)
+
+        async with store() as db:
+            batch = await db.get(CaseBatch, batch_id)
+            assert batch.status == "COMPLETED"
+            assert (batch.processed, batch.succeeded, batch.failed) == (3, 3, 0)
+            proposals = (await db.execute(select(CaseDecision).where(
+                CaseDecision.batch_id == batch_id).order_by(CaseDecision.case_id))).scalars().all()
+            assert len(proposals) == 2
+            assert {proposal.case_id for proposal in proposals} == set(case_ids[1:])
+            first = await db.get(FraudCase, case_ids[0])
+            assert first.status == "UNDER_REVIEW"
 
     asyncio.run(run())
 
@@ -403,9 +521,11 @@ def test_api_routing_pagination_assessments_and_logout(store, monkeypatch):
     async def run():
         async with store() as db:
             user = User(username="admin", password_hash=hash_password("Test!123456"), role="admin")
-            db.add(user)
+            analyst = User(username="analyst", password_hash=hash_password("Test!123456"), role="analyst")
+            db.add_all([user, analyst])
             await db.commit()
             token = create_token(user)
+            analyst_token = create_token(analyst)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
                 headers={"Authorization": f"Bearer {token}"}) as client:
             body = dict(external_id="api-1", account_id="ACCOUNT-ONE", amount="10000.01",
@@ -438,8 +558,9 @@ def test_api_routing_pagination_assessments_and_logout(store, monkeypatch):
             review = await client.get("/cases?review_required=true&sort=risk&limit=1")
             assert review.status_code == 200 and review.json()["total"] == 1
             case_id = pushed.json()["case_id"]
-            assert (await client.post(f"/cases/{case_id}/actions", json={"action": "ESCALATED"})).status_code == 422
-            escalated = await client.post(f"/cases/{case_id}/actions", json={"action": "ESCALATED", "note": "Verify filing applicability"})
+            analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+            assert (await client.post(f"/cases/{case_id}/actions", json={"action": "ESCALATED"}, headers=analyst_headers)).status_code == 422
+            escalated = await client.post(f"/cases/{case_id}/actions", json={"action": "ESCALATED", "note": "Verify filing applicability"}, headers=analyst_headers)
             assert escalated.status_code == 200, escalated.text
             assert escalated.json()["ctr_required"]
             assert (await client.get("/stats")).json()["pending_review"] == 1

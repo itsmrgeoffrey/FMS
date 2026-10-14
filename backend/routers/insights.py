@@ -403,18 +403,29 @@ class BacktestRequest(BaseModel):
     limit: int = 5000              # cap on transactions replayed
 
 
-def _replay(normalized: list) -> dict:
+def _replay(normalized: list, exemptions=()) -> dict:
     """Replay the deterministic engine over the stored transactions under the
     CURRENT global parameters. History for each transaction = the prior
     transactions of the same account within the replay set (chronological)."""
     by_account: dict[str, list] = {}
+    by_party: dict[tuple, list] = {}
     flagged = sar = ctr = 0
     verdicts = []
     for norm in normalized:
         history = by_account.setdefault(norm.account_id, [])
-        v = A.evaluate(norm, list(history))
+        combined = {(item.source_table, item.id): item for item in history}
+        party_keys = []
+        if norm.is_cash is True:
+            party_keys = [(role, identity, A.business_day(norm), norm.currency, norm.direction)
+                for role, identity in (("holder", norm.account_holder_id), ("conductor", norm.conductor_id)) if identity]
+            for key in party_keys:
+                for item in by_party.get(key, []):
+                    combined[(item.source_table, item.id)] = item
+        v = A.evaluate(norm, list(combined.values()), exemptions)
         verdicts.append(v)
         history.append(norm)
+        for key in party_keys:
+            by_party.setdefault(key, []).append(norm)
         if v["is_fraudulent"]:
             flagged += 1
         if v["sar_recommended"]:
@@ -477,11 +488,13 @@ async def run_rules_backtest(body: BacktestRequest, db: AsyncSession):
     # The evaluate() loop is fully synchronous — no awaits between apply and
     # restore — so the temporary parameter swap can't leak into live requests
     # handled by this single-threaded event loop.
-    current = _replay(normalized)
+    from backend.routers.ctr_exemptions import records_for
+    exemptions = await records_for(db, {item.account_holder_id for item in normalized if item.account_holder_id})
+    current = _replay(normalized, exemptions)
     snap = A.snapshot_rules()
     try:
         A.apply_rule_overrides(body.proposed or {})
-        proposed = _replay(normalized)
+        proposed = _replay(normalized, exemptions)
     except (TypeError, ValueError) as exc:
         from fastapi import HTTPException
         raise HTTPException(422, str(exc)) from exc
@@ -515,7 +528,7 @@ async def run_rules_backtest(body: BacktestRequest, db: AsyncSession):
         "window_days": max(1, min(body.days, 365)),
         "note": "Replay of stored API and polled transactions through the deterministic engine. "
                 "Exact processing snapshots are preferred; legacy cash classification may be unknown. "
-                "Account history is approximated within the replay window; sanctions screening "
+                "Account and cash-party history are limited to the replay window; current approved exemption records apply. Sanctions screening "
                 "and case creation are not part of a backtest.",
         "current": _summary(current),
         "proposed": _summary(proposed),

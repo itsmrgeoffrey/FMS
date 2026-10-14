@@ -11,7 +11,7 @@ Two separate credentials for two separate callers:
 | **People / the dashboard** | `Authorization: Bearer <token>` from `POST /auth/login` | HMAC-signed, expiring token (`FMS_AUTH_TOKEN_TTL_HOURS`, default 12h). Roles enforced server-side per endpoint. |
 | **Machines pushing transactions** | `X-API-Key: <FMS_INGEST_API_KEY>` on `/ingest/transactions` | Rejected keys are audited (`INGEST_KEY_REJECTED`). |
 
-Roles: **admin** / **analyst** / **viewer** — matrix in [ARCHITECTURE.md](ARCHITECTURE.md#rbac-design).
+Roles: **admin** / **analyst** (inputter) / **approver** / **viewer** — matrix in [ARCHITECTURE.md](ARCHITECTURE.md#rbac-design).
 
 ## Ingestion (API-push mode)
 
@@ -29,6 +29,10 @@ Returns the verdict **synchronously**: risk score/level, the named signals that 
 
 The ingestion contract also accepts cash classification, business date, transaction instrument, branch/location, conductor, and stable account-holder identifiers. Supplying these fields enables the explicit same-day cross-branch cash structuring alert; `structuring_alert` is returned independently from `ctr_required`.
 
+Cash reporting aggregates across accounts and feeds using consistent `account_holder_id` or `conductor_id` values. Optional `acting_as_agent` (boolean) and `cash_purpose` (`PAYROLL` or `OTHER`) establish transaction scope for an approved exemption. Unknown agent status prevents exemption application. Callers cannot submit a self-approved exemption flag. The result's `assessment.ctr_assessment` records grouping totals and any applied exemption.
+
+Administrators manage exemption records using `GET /ctr-exemptions`, `POST /ctr-exemptions`, and `POST /ctr-exemptions/{id}/revoke`. Both creation and revocation return a pending approval; a different active administrator decides it through the existing `/approvals/{id}/approve` or `/reject` endpoints. See [Cash Reporting](CASH_REPORTING.md) for the complete scope, evidence requirements, and examples.
+
 **→ Integrating a system to push transactions?** The full integrator guide — field-by-field request/response schema, error codes, idempotency, and copy-paste **curl / Python / Node** examples — is in **[PUSH_API.md](PUSH_API.md)**. It's the page to hand an institution that just wants to POST transactions without touching a database.
 
 ## Cases & investigation
@@ -37,9 +41,16 @@ The ingestion contract also accepts cash classification, business date, transact
 |---|---|---|
 | `GET /cases` | viewer+ | List/filter cases (status, confidence, `direction=INWARD|OUTWARD`, dates, pagination) |
 | `GET /cases/{id}` | viewer+ | Full case detail: signals, reasons, screening result, action history |
-| `POST /cases/{id}/actions` | analyst+ | Dispose: `CONFIRMED_FRAUD` / `DISMISSED` / `ESCALATED` / `UNDER_REVIEW` / note — attributed to the named actor, audited as `CASE_*` |
+| `POST /cases/{id}/actions` | analyst; approver/admin for senior review | `REVIEW` claims, `RELEASED` releases, `ESCALATED` routes to senior review, `CONFIRMED` / `DISMISSED` submits a proposal, `NOTE_ADDED` records a note. Authenticated identity supplies the actor. |
+| `POST /cases/{id}/decision/approve` | approver/admin | Approve another user's proposal and finalize the case |
+| `POST /cases/{id}/decision/reject` | approver/admin | Required rejection note; return to the original reviewer |
+| `POST /cases/{id}/decision/cancel` | original maker | Withdraw a pending proposal and resume review |
+| `POST /cases/bulk-actions` | action-dependent | Snapshot explicit IDs or validated filters, enqueue durable bulk work |
+| `GET /cases/batches/{id}` | batch requester; approver/admin | Progress counts and up to 100 per-case errors |
 | `GET /search?q=` | viewer+ | Global search: account, beneficiary/sender, case id, reference |
-| `GET /ws` | token | WebSocket live feed — `new_case` events push to the dashboard in real time |
+| `GET /ws` | token | Live feed: `new_case`, `case_updated`, `case_batch_progress`, `case_batch_completed` |
+
+`GET /cases?queue=review|approvals|escalations|all` selects the workflow queue. Standard and senior reviews require assignment before a disposition can be proposed. Final approval never clears separate CTR/SAR reporting flags. See [Case Workflow](CASE_WORKFLOW.md) for payloads and bulk limits.
 
 ## Reports (CTR / SAR)
 
@@ -98,7 +109,8 @@ Configure `integrations.callback_url` + `callback_secret` (Administration → AP
 | Event | When |
 |---|---|
 | `case.flagged` | A transaction is flagged into a case |
-| `case.disposition` | An analyst confirms/dismisses/escalates |
+| `case.decision_requested` | A reviewer submits a fraud/dismissal proposal |
+| `case.disposition` | An independent checker approves a final fraud/dismissal disposition |
 
 Envelope: `{"event": "...", "sent_at": <unix>, "data": {case_id, external_id, account_id, amount, currency, direction, status, risk_score, confidence, fraud_type, sanctions_hit, ctr_required, sar_recommended, reasons}}`
 

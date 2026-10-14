@@ -67,6 +67,8 @@ async def dual_control_active(db: AsyncSession) -> bool:
 
 
 def requires_independent_approval(action: str, payload: dict) -> bool:
+    if action in {"CTR_EXEMPTION_CREATE", "CTR_EXEMPTION_REVOKE"}:
+        return True
     return action == "SETTINGS_UPDATE" and any(
         payload.get(key) is not None for key in ("rules", "operating_profile"))
 

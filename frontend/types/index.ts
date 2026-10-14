@@ -7,6 +7,20 @@ export interface CaseAction {
   created_at: string;
 }
 
+export interface CaseDecision {
+  id: string;
+  case_id: string;
+  proposed_action: "CONFIRMED" | "DISMISSED";
+  rationale: string;
+  requested_by: string;
+  requested_at: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  batch_id: string | null;
+}
+
 export interface FraudCase {
   assessment?: Assessment;
   id: string;
@@ -32,7 +46,12 @@ export interface FraudCase {
   fraud_type: string | null;
   reasons: string[];
   ai_summary: string | null;
-  status: "CLEAN" | "OPEN" | "UNDER_REVIEW" | "CONFIRMED_FRAUD" | "DISMISSED" | "ESCALATED";
+  status: "CLEAN" | "OPEN" | "UNDER_REVIEW" | "PENDING_APPROVAL" | "CONFIRMED_FRAUD" | "DISMISSED" | "ESCALATED";
+  assigned_to: string | null;
+  assigned_at: string | null;
+  review_due_at: string | null;
+  review_level: "STANDARD" | "SENIOR";
+  pending_decision: CaseDecision | null;
   created_at: string;
   updated_at: string;
   actions: CaseAction[];
@@ -57,6 +76,10 @@ export interface FraudCaseListItem {
   confidence: "HIGH" | "MEDIUM" | "LOW";
   fraud_type: string | null;
   status: string;
+  assigned_to: string | null;
+  assigned_at: string | null;
+  review_level: "STANDARD" | "SENIOR";
+  pending_decision: CaseDecision | null;
   created_at: string;
 }
 
@@ -65,6 +88,20 @@ export interface CasesPage {
   total: number;
   page: number;
   limit: number;
+}
+
+export interface CaseBatch {
+  id: string;
+  action: string;
+  requested_by: string;
+  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  errors: { case_id?: string; error: string }[];
+  created_at: string;
+  completed_at: string | null;
 }
 
 export interface Assessment {
@@ -76,6 +113,13 @@ export interface Assessment {
   structuring_alert?: boolean;
   cash_classification?: boolean | null;
   business_date?: string;
+  ctr_assessment?: {
+    trigger: string;
+    exemption?: { status: string; id: string | null; approved_by: string | null };
+    groups?: { basis: string; subject_id: string; gross_total: string; reportable_total: string;
+      transaction_count: number; transactions: { source: string; transaction_id: string; account_id: string; amount: string;
+        reportable: boolean; exemption_status: string; exemption_id: string | null; approved_by: string | null }[] }[];
+  };
   transaction_context?: {
     account_holder_id?: string | null;
     account_holder_name?: string | null;
@@ -84,6 +128,8 @@ export interface Assessment {
     location_id?: string | null;
     conductor_id?: string | null;
     conductor_name?: string | null;
+    acting_as_agent?: boolean | null;
+    cash_purpose?: string | null;
   };
   screening_matches?: { party: string; query: string; matched_name: string; source: string; list_type: string; score: number }[];
 }
@@ -93,7 +139,7 @@ export interface AuthUser {
   username: string;
   email: string | null;
   full_name: string | null;
-  role: "admin" | "analyst" | "viewer";
+  role: "admin" | "analyst" | "approver" | "viewer";
   is_active: boolean;
   /** True while the account is still on an admin-issued temporary password. */
   must_change_password?: boolean;

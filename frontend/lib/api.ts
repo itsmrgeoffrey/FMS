@@ -1,5 +1,5 @@
 import type {
-  CasesPage, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig, AnalyticsKpis,
+  CasesPage, CaseBatch, FraudCase, Stats, AuthUser, AuditEntry, Dashboard, Customer, RulesConfig, AnalyticsKpis,
   BacktestResult, RuleChangeEntry, Scan314aResult, RiskAssessment, RiskAssessmentList, InstallationInfo,
 } from "@/types";
 
@@ -137,6 +137,22 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, note, actor }),
     }),
+
+  approveCaseDecision: (id: string, note?: string): Promise<FraudCase> =>
+    req<FraudCase>(`/cases/${id}/decision/approve`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),
+    }),
+  rejectCaseDecision: (id: string, note: string): Promise<FraudCase> =>
+    req<FraudCase>(`/cases/${id}/decision/reject`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),
+    }),
+  cancelCaseDecision: (id: string): Promise<FraudCase> =>
+    req<FraudCase>(`/cases/${id}/decision/cancel`, { method: "POST" }),
+  createCaseBatch: (payload: { action: string; rationale: string; case_ids: string[]; all_matching: boolean; filters: Record<string, string | number> }): Promise<CaseBatch> =>
+    req<CaseBatch>("/cases/bulk-actions", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  getCaseBatch: (id: string): Promise<CaseBatch> => req<CaseBatch>(`/cases/batches/${id}`),
 
   getStats: (): Promise<Stats> => req<Stats>("/stats"),
 
@@ -277,6 +293,11 @@ export const api = {
     }),
 
   // Dual control (maker-checker) approvals
+  listCtrExemptions: (): Promise<{ items: CtrExemption[] }> => req("/ctr-exemptions"),
+  proposeCtrExemption: (body: CtrExemptionInput): Promise<MaybePending<{ id: string }>> =>
+    req("/ctr-exemptions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  revokeCtrExemption: (id: string, reason: string): Promise<MaybePending<{ id: string }>> =>
+    req(`/ctr-exemptions/${id}/revoke`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) }),
   listApprovals: (): Promise<ApprovalsPage> => req("/approvals"),
   approveChange: (id: string): Promise<{ approved: boolean; summary: string; result: Record<string, unknown> }> =>
     req(`/approvals/${id}/approve`, { method: "POST" }),
@@ -300,6 +321,7 @@ export type MaybePending<T> = (T & { pending?: false }) | {
 };
 
 export interface Approval {
+  ctr_exemption_proposal?: Record<string, unknown>;
   configuration_proposal?: {
     kind: "rules" | "operating_profile";
     before: Record<string, unknown>;
@@ -318,6 +340,31 @@ export interface Approval {
   decided_by: string | null;
   decided_at: string | null;
   decision_note: string | null;
+}
+
+export interface CtrExemptionInput {
+  subject_id: string;
+  subject_name: string;
+  exemption_type: string;
+  account_ids: string[];
+  effective_from: string;
+  expires_on: string;
+  reviewed_on: string;
+  review_due: string;
+  eligibility_basis: string;
+  evidence_reference: string;
+  designation_reference: string | null;
+  eligibility_verified: boolean;
+}
+
+export interface CtrExemption extends Omit<CtrExemptionInput, "eligibility_verified"> {
+  id: string;
+  evaluation_status: string;
+  status: string;
+  created_by: string;
+  approved_by: string;
+  approved_at: string;
+  revocation_reason: string | null;
 }
 
 export interface ApprovalsPage {

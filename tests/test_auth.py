@@ -74,15 +74,27 @@ def test_malformed_token_is_rejected():
 
 def test_role_capabilities_matrix():
     assert auth.role_has("admin", "admin")
-    assert auth.role_has("admin", "act")
+    assert auth.role_has("admin", "approve_case")
+    assert not auth.role_has("admin", "act")
+    assert auth.role_has("admin", "simulate")
     assert auth.role_has("admin", "view")
 
     assert not auth.role_has("analyst", "admin")
     assert auth.role_has("analyst", "act")
+    assert not auth.role_has("analyst", "approve_case")
+    assert auth.role_has("analyst", "simulate")
     assert auth.role_has("analyst", "view")
+
+    assert not auth.role_has("approver", "admin")
+    assert not auth.role_has("approver", "act")
+    assert auth.role_has("approver", "approve_case")
+    assert not auth.role_has("approver", "simulate")
+    assert auth.role_has("approver", "view")
 
     assert not auth.role_has("viewer", "admin")
     assert not auth.role_has("viewer", "act")
+    assert not auth.role_has("viewer", "approve_case")
+    assert not auth.role_has("viewer", "simulate")
     assert auth.role_has("viewer", "view")
 
 
@@ -92,4 +104,4 @@ def test_unknown_role_has_no_capabilities():
 
 
 def test_valid_roles_set():
-    assert auth.VALID_ROLES == {"admin", "analyst", "viewer"}
+    assert auth.VALID_ROLES == {"admin", "analyst", "approver", "viewer"}

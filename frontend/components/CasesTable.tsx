@@ -8,7 +8,7 @@ import { StatusBadge } from "./StatusBadge";
 import { RiskScoreBadge } from "./RiskScoreBadge";
 import { DirectionBadge } from "./ReviewUI";
 
-const STATUSES = ["", "CLEAN", "OPEN", "UNDER_REVIEW", "CONFIRMED_FRAUD", "DISMISSED", "ESCALATED"];
+const STATUSES = ["", "CLEAN", "OPEN", "UNDER_REVIEW", "PENDING_APPROVAL", "CONFIRMED_FRAUD", "DISMISSED", "ESCALATED"];
 const CONFIDENCES = ["", "HIGH", "MEDIUM", "LOW"];
 
 function fmt(amount: number, currency: string) {
