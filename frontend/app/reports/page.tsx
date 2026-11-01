@@ -109,12 +109,13 @@ export default function ReportsPage() {
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
         <div className="px-4 py-2 border-b border-gray-100 text-xs text-gray-500">{rows.length} record(s)</div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[950px] text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
                 <th className="px-4 py-3 font-medium">Account</th>
                 <th className="px-4 py-3 font-medium">Amount</th>
-                <th className="px-4 py-3 font-medium">Beneficiary / sender</th>
+                <th className="px-4 py-3 font-medium">Beneficiary</th>
+                <th className="px-4 py-3 font-medium">Sender</th>
                 {tab === "sar" ? (
                   <>
                     <th className="px-4 py-3 font-medium">Type</th>
@@ -128,13 +129,17 @@ export default function ReportsPage() {
             </thead>
             <tbody className={loading ? "opacity-50" : ""}>
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-12 text-gray-400">No {tab.toUpperCase()} records.</td></tr>
+                <tr><td colSpan={tab === "sar" ? 7 : 5} className="text-center py-12 text-gray-400">No {tab.toUpperCase()} records.</td></tr>
               )}
-              {rows.map((r, i) => (
+              {rows.map((r, i) => {
+                const direction = String(r.direction ?? "");
+                const name = String(r.counterparty_name ?? "—");
+                return (
                 <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-gray-800">{String(r.account_id ?? "")}</td>
                   <td className="px-4 py-3 font-semibold text-gray-900 whitespace-nowrap">{money(r.amount, r.currency)}</td>
-                  <td className="px-4 py-3 text-gray-600 max-w-[180px] truncate">{String(r.counterparty_name ?? "—")}</td>
+                  <td className="px-4 py-3 text-gray-600 max-w-[180px] truncate">{direction === "OUTWARD" ? name : "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 max-w-[180px] truncate">{direction === "INWARD" ? name : "—"}</td>
                   {tab === "sar" ? (
                     <>
                       <td className="px-4 py-3 text-gray-600">{String(r.fraud_type ?? "—")}</td>
@@ -151,7 +156,8 @@ export default function ReportsPage() {
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-[320px] truncate">{String(r.ctr_reason ?? "—")}</td>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

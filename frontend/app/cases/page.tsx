@@ -18,7 +18,7 @@ export default function CasesPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
+    <div className="w-full max-w-[1800px] p-6 space-y-6 mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Transaction Monitor</h1>

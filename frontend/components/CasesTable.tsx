@@ -61,7 +61,7 @@ export function CasesTable({ refresh }: { refresh?: number }) {
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[1500px] text-sm">
           <thead>
             <tr className="text-left text-[11px] text-gray-400 uppercase tracking-wider border-b border-gray-100 bg-gray-50/40">
               <th className="px-4 py-2.5 font-semibold">Time</th>

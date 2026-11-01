@@ -88,21 +88,22 @@ export default function TransactionsPage() {
 
       {error && <div role="alert" className="text-sm text-red-700">{error} <button className="underline" onClick={() => { startLoading(); setRefresh((r) => r + 1); }}>Retry</button></div>}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
               <th className="px-4 py-3 font-medium">Time</th>
               <th className="px-4 py-3 font-medium">Account</th>
               <th className="px-4 py-3 font-medium">Amount</th>
               <th className="px-4 py-3 font-medium">Dir</th>
-              <th className="px-4 py-3 font-medium">Beneficiary / sender</th>
+              <th className="px-4 py-3 font-medium">Beneficiary</th>
+              <th className="px-4 py-3 font-medium">Sender</th>
               <th className="px-4 py-3 font-medium">Result</th>
               <th className="px-4 py-3 font-medium" />
             </tr>
           </thead>
           <tbody className={loading ? "opacity-50" : ""}>
             {!loading && !error && items.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">
+              <tr><td colSpan={8} className="text-center py-12 text-gray-400">
                 {range.date_from || range.date_to ? "No transactions in this date range." : "No transactions."}
               </td></tr>
             )}
@@ -114,7 +115,8 @@ export default function TransactionsPage() {
                 <td className="px-4 py-3">
                   <DirectionBadge direction={c.direction} />
                 </td>
-                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.counterparty_name || "—"}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "OUTWARD" ? (c.counterparty_name || "—") : "—"}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "INWARD" ? (c.counterparty_name || "—") : "—"}</td>
                 <td className="px-4 py-3">
                   <ResultBadge c={c} />
                 </td>
