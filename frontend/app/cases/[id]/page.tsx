@@ -62,7 +62,7 @@ function CaseDetail({ id }: { id: string }) {
       <a href="#review-decision" className="mt-4 inline-block text-sm font-medium text-blue-700 underline underline-offset-4 xl:hidden">Review decision</a>
       <dl className="mt-6 grid border-y border-gray-200 bg-white md:grid-cols-3">
         <div className="min-w-0 border-b border-gray-100 p-4 md:border-b-0 md:border-r"><dt className="mb-2 flex items-center gap-2 text-xs text-gray-500"><Activity size={15} />Detection</dt><dd className="text-sm font-semibold text-gray-800">{legacy ? "Reassessment required" : words(assessment?.detection_status)}</dd></div>
-        <div className="min-w-0 border-b border-gray-100 p-4 md:border-b-0 md:border-r"><dt className="mb-2 flex items-center gap-2 text-xs text-gray-500"><ShieldAlert size={15} />Sanctions screening</dt><dd className={`text-sm font-semibold ${assessment?.screening_status === "NO_MATCH" ? "text-gray-800" : "text-amber-800"}`}>{legacy ? "Legacy / unverified" : words(assessment?.screening_status)}</dd></div>
+        <div className="min-w-0 border-b border-gray-100 p-4 md:border-b-0 md:border-r"><dt className="mb-2 flex items-center gap-2 text-xs text-gray-500"><ShieldAlert size={15} />Sanctions screening</dt><dd className={`text-sm font-semibold ${assessment?.screening_status === "NO_MATCH" ? "text-gray-800" : "text-amber-800"}`}>{legacy ? "Not assessed" : words(assessment?.screening_status)}</dd></div>
         <div className="min-w-0 p-4"><dt className="mb-2 flex items-center gap-2 text-xs text-gray-500"><FileCheck2 size={15} />Reporting assessment</dt><dd className="text-sm font-semibold text-blue-800">{words(assessment?.regulatory_status)}</dd><dd className="mt-1 text-xs text-gray-500">Filing: {words(assessment?.reporting_status)}</dd></div>
       </dl>
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -86,7 +86,7 @@ function CaseDetail({ id }: { id: string }) {
           </section>
           <section className="review-section"><h2 className="mb-4">Screening &amp; reporting</h2>
             <div className="space-y-4 text-sm">
-              {legacy && <p className="border-l-4 border-amber-400 bg-amber-50 p-4 text-amber-900">Legacy assessment. Screening and reporting requirements need reassessment.</p>}
+              {legacy && <p className="border-l-4 border-amber-400 bg-amber-50 p-4 text-amber-900">This record has not been assessed under the current controls. Review screening and reporting requirements.</p>}
               {caseData.sanctions_hit && <div className="border-l-4 border-red-400 bg-red-50 p-4"><h3 className="font-semibold text-red-900">Possible sanctions match</h3><p className="mt-2 break-words text-red-800">{caseData.sanctions_detail}</p><p className="mt-2 text-xs text-red-700">Identity and program verification outstanding. A name match is not a confirmed identity.</p></div>}
               {!legacy && !caseData.sanctions_hit && assessment?.screening_status !== "NO_MATCH" && <p className="border-l-4 border-amber-400 bg-amber-50 p-4 text-amber-900">Screening is {words(assessment?.screening_status).toLowerCase()}. No clearance has been established.</p>}
               {!legacy && assessment?.screening_status === "NO_MATCH" && <p className="text-gray-600">No screening candidate was recorded at assessment time.</p>}

@@ -54,8 +54,7 @@ export function ReviewFlags({ item }: { item: Pick<ReviewItem, "ctr_required" | 
     {item.ctr_required && <span className="review-tag bg-blue-50 text-blue-800">CTR review</span>}
     {item.sar_recommended && <span className="review-tag bg-amber-50 text-amber-800">SAR review</span>}
     {item.sanctions_hit && <span className="review-tag bg-red-50 text-red-700">Possible match</span>}
-    {legacy ? <span className="review-tag bg-gray-100 text-gray-600">Legacy assessment</span> :
-      screening !== "NO_MATCH" && screening !== "POSSIBLE_MATCH" && <span className="review-tag bg-amber-50 text-amber-800">Screening: {words(screening)}</span>}
+    {!legacy && screening !== "NO_MATCH" && screening !== "POSSIBLE_MATCH" && <span className="review-tag bg-amber-50 text-amber-800">Screening: {words(screening)}</span>}
     {!item.assessment?.structuring_alert && !item.ctr_required && !item.sar_recommended && !item.sanctions_hit && !legacy && screening === "NO_MATCH" && <span className="text-xs text-gray-500">No reporting flag</span>}
   </div>;
 }

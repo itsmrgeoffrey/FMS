@@ -375,11 +375,11 @@ export default function DemoPage() {
                 </div>
                 <div className="mt-3">
                   <label className="text-xs text-gray-400 mb-1 block">
-                    Account Holder Name
+                    {direction === "OUTWARD" ? "Sender Name" : "Beneficiary Name"}
                   </label>
                   <input
                     type="text"
-                    placeholder="Optional account holder"
+                    placeholder={direction === "OUTWARD" ? "Name on sending account" : "Name on receiving account"}
                     value={form.account_holder_name}
                     onChange={e => set("account_holder_name", e.target.value)}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500"
@@ -584,7 +584,7 @@ export default function DemoPage() {
                 Cancel
               </button>
               <button onClick={submit} className="flex-1 py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm">
-                Submit for Assessment
+                Submit
               </button>
             </div>
           </div>
@@ -619,7 +619,7 @@ export default function DemoPage() {
                 </svg>
               </div>
               <div className="text-center">
-                <p className="text-gray-900 font-bold text-2xl">{verdict?.structuring_alert ? "Structuring Alert" : verdict?.flagged ? "Review Required" : "Assessment Complete"}</p>
+                <p className="text-gray-900 font-bold text-2xl">Transaction Successful</p>
                 <p className="text-gray-400 text-sm mt-1">{fmtAmt(parseFloat(form.amount) || 0, form.currency)} assessed</p>
                 <p className="text-sm mt-2">Risk {verdict?.risk_score}/100{verdict?.structuring_alert ? " · Structuring" : ""}{verdict?.ctr_required ? " · CTR review" : ""}{verdict?.sar_recommended ? " · SAR review" : ""}</p>
                 {verdict && <Link href={`/cases/${verdict.case_id}`} className="text-blue-600 text-sm inline-block mt-3">View assessment</Link>}
@@ -629,6 +629,10 @@ export default function DemoPage() {
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-400">Reference</span>
                   <span className="text-gray-700 font-mono text-xs">{lastReference || "TRF/PENDING"}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">{direction === "OUTWARD" ? "Sender" : "Beneficiary"}</span>
+                  <span className="text-gray-700 font-medium">{form.account_holder_name || "Not provided"}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-400">{direction === "OUTWARD" ? "Beneficiary" : "Sender"}</span>

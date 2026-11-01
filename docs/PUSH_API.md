@@ -61,8 +61,8 @@ X-API-Key: <your key>
 | `timestamp` | string (ISO 8601) | — | Defaults to server time (UTC) if omitted. |
 | `counterparty_account` | string (≤64) | — | API-compatible field for the beneficiary account on outward transactions or sender account on inward transactions. |
 | `counterparty_name` | string (≤200) | — | Generic API-compatible field for the beneficiary (outward) or sender (inward); screened against the OFAC lists. |
-| `beneficiary_account` / `beneficiary_name` | string | — | Optional aliases for `counterparty_account` / `counterparty_name` when `direction` is `OUTWARD`; supplying them for inward activity is rejected. |
-| `sender_account` / `sender_name` | string | — | Optional aliases for `counterparty_account` / `counterparty_name` when `direction` is `INWARD`; supplying them for outward activity is rejected. |
+| `beneficiary_account` / `beneficiary_name` | string | — | Optional party-role fields. For outward activity, they identify the external counterparty; for inward activity, they identify the monitored account holder. |
+| `sender_account` / `sender_name` | string | — | Optional party-role fields. For inward activity, they identify the external counterparty; for outward activity, they identify the monitored account holder. |
 | `channel` | string (≤40) | — | e.g. `wire`, `ach`, `card`, `transfer`. |
 | `currency` | three-letter string | — | Defaults to `USD`. |
 | `reference` | string (≤255) | — | Free-text reference / memo. |

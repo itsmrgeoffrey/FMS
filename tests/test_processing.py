@@ -73,18 +73,22 @@ def test_ingest_directional_party_aliases_preserve_sender_and_beneficiary_roles(
     from backend.routers.ingest import TxnIn
 
     inward = TxnIn(external_id="incoming-party", account_id="A", amount="100",
-        direction="INWARD", sender_account="SENDER-001", sender_name="Incoming Sender")
+        direction="INWARD", sender_account="SENDER-001", sender_name="Incoming Sender",
+        beneficiary_account="A", beneficiary_name="Receiving Beneficiary")
     assert inward.counterparty_account == "SENDER-001"
     assert inward.counterparty_name == "Incoming Sender"
+    assert inward.account_holder_name == "Receiving Beneficiary"
 
     outward = TxnIn(external_id="outgoing-party", account_id="A", amount="100",
-        direction="OUTWARD", beneficiary_account="BEN-001", beneficiary_name="Outgoing Beneficiary")
+        direction="OUTWARD", beneficiary_account="BEN-001", beneficiary_name="Outgoing Beneficiary",
+        sender_account="A", sender_name="Sending Customer")
     assert outward.counterparty_account == "BEN-001"
     assert outward.counterparty_name == "Outgoing Beneficiary"
+    assert outward.account_holder_name == "Sending Customer"
 
-    with pytest.raises(ValidationError, match="sender_account"):
+    with pytest.raises(ValidationError, match="must match account_id"):
         TxnIn(external_id="wrong-party", account_id="A", amount="100",
-            direction="OUTWARD", sender_name="Should not be a beneficiary")
+            direction="OUTWARD", sender_account="NOT-THE-SOURCE")
 
 
 def test_processing_preserves_context_and_returns_structuring_alert(store):

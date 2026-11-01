@@ -37,8 +37,9 @@ class TxnIn(BaseModel):
     counterparty_account: str | None = Field(None, max_length=64)
     counterparty_name: str | None = Field(None, max_length=200)
     # Direction-aware convenience aliases. The normalized storage contract
-    # remains counterparty_* so API, simulator, and database-poll sources use
-    # one processor, but callers can name the party in business terms.
+    # remains counterparty_* plus account_holder_name so API, simulator, and
+    # database-poll sources use one processor, while callers can supply both
+    # parties in business terms.
     beneficiary_account: str | None = Field(None, max_length=64)
     beneficiary_name: str | None = Field(None, max_length=200)
     sender_account: str | None = Field(None, max_length=64)
@@ -68,33 +69,27 @@ class TxnIn(BaseModel):
 
     @model_validator(mode="after")
     def normalize_directional_party(self):
-        """Keep beneficiary/sender semantics aligned to the declared direction.
-
-        FMS must not guess direction from a party name: direction drives cash
-        reporting, behavioral checks, and the presentation of the party. The
-        source-specific aliases make API integrations clearer while preventing
-        a sender from being silently recorded as an outward beneficiary.
-        """
+        """Map both named parties to the normalized account/counterparty fields."""
         if self.direction == "OUTWARD":
-            role, wrong_role = "beneficiary", "sender"
+            counterparty_role, account_role = "beneficiary", "sender"
             named_account, named_name = self.beneficiary_account, self.beneficiary_name
-            wrong_account, wrong_name = self.sender_account, self.sender_name
+            holder_account, holder_name = self.sender_account, self.sender_name
         else:
-            role, wrong_role = "sender", "beneficiary"
+            counterparty_role, account_role = "sender", "beneficiary"
             named_account, named_name = self.sender_account, self.sender_name
-            wrong_account, wrong_name = self.beneficiary_account, self.beneficiary_name
+            holder_account, holder_name = self.beneficiary_account, self.beneficiary_name
 
-        if wrong_account or wrong_name:
-            raise ValueError(
-                f"{wrong_role}_account and {wrong_role}_name do not apply to a {self.direction} transaction; "
-                f"use {role}_account and {role}_name instead"
-            )
         if self.counterparty_account and named_account and self.counterparty_account != named_account:
-            raise ValueError("counterparty_account conflicts with the direction-specific account")
+            raise ValueError(f"counterparty_account conflicts with the {counterparty_role}_account")
         if self.counterparty_name and named_name and self.counterparty_name != named_name:
-            raise ValueError("counterparty_name conflicts with the direction-specific name")
+            raise ValueError(f"counterparty_name conflicts with the {counterparty_role}_name")
+        if holder_account and holder_account != self.account_id:
+            raise ValueError(f"{account_role}_account must match account_id for a monitored transaction")
+        if self.account_holder_name and holder_name and self.account_holder_name != holder_name:
+            raise ValueError(f"account_holder_name conflicts with the {account_role}_name")
         self.counterparty_account = self.counterparty_account or named_account
         self.counterparty_name = self.counterparty_name or named_name
+        self.account_holder_name = self.account_holder_name or holder_name
         return self
 
 

@@ -94,8 +94,8 @@ export function CasesTable({ refresh }: { refresh?: number }) {
                 <td className="px-4 py-3">
                   <DirectionBadge direction={c.direction} />
                 </td>
-                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "OUTWARD" ? (c.counterparty_name || "—") : "—"}</td>
-                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "INWARD" ? (c.counterparty_name || "—") : "—"}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "OUTWARD" ? (c.counterparty_name || "—") : (c.assessment?.transaction_context?.account_holder_name || "—")}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "OUTWARD" ? (c.assessment?.transaction_context?.account_holder_name || "—") : (c.counterparty_name || "—")}</td>
                 <td className="px-4 py-3 text-gray-600 capitalize">{c.fraud_type || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
