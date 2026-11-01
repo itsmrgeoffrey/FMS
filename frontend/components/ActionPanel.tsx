@@ -77,7 +77,9 @@ export function ActionPanel({ caseData, onUpdate }: {
   const senior = caseData.review_level === "SENIOR";
   const authorizedReviewer = senior ? canApprove : canInput;
   if (!authorizedReviewer) {
-    return <p className="text-sm text-gray-500">{senior ? "This senior review requires an Approver or Admin." : "Analyst/inputter access is required to investigate this case."}</p>;
+    return <p className="text-sm text-gray-600">{senior
+      ? "This case is escalated. An Approver or Admin must claim the senior review."
+      : "An Analyst/Inputter must claim and investigate this standard case. They can escalate it or submit a fraud or dismissal proposal for your review."}</p>;
   }
   if (caseData.status !== "UNDER_REVIEW" || !caseData.assigned_to) {
     return <div className="space-y-3">

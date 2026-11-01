@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Copy, Check, ShieldAlert, FileCheck2, Activity } from "lucide-react";
+import { ArrowLeft, Copy, Check, ShieldAlert, FileCheck2, Activity, ListChecks } from "lucide-react";
 import { api } from "@/lib/api";
 import type { FraudCase } from "@/types";
 import { ConfidenceBadge } from "@/components/ConfidenceBadge";
@@ -60,6 +60,11 @@ function CaseDetail({ id }: { id: string }) {
       </header>
       <div className="mt-5"><ReviewFlags item={caseData} /></div>
       <a href="#review-decision" className="mt-4 inline-block text-sm font-medium text-blue-700 underline underline-offset-4 xl:hidden">Review decision</a>
+      <button type="button" onClick={() => document.getElementById("review-decision")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+        className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-blue-700 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        aria-label="Go to review actions">
+        <ListChecks size={17} /> Review actions
+      </button>
       <dl className="mt-6 grid border-y border-gray-200 bg-white md:grid-cols-3">
         <div className="min-w-0 border-b border-gray-100 p-4 md:border-b-0 md:border-r"><dt className="mb-2 flex items-center gap-2 text-xs text-gray-500"><Activity size={15} />Detection</dt><dd className="text-sm font-semibold text-gray-800">{legacy ? "Reassessment required" : words(assessment?.detection_status)}</dd></div>
         <div className="min-w-0 border-b border-gray-100 p-4 md:border-b-0 md:border-r"><dt className="mb-2 flex items-center gap-2 text-xs text-gray-500"><ShieldAlert size={15} />Sanctions screening</dt><dd className={`text-sm font-semibold ${assessment?.screening_status === "NO_MATCH" ? "text-gray-800" : "text-amber-800"}`}>{legacy ? "Not assessed" : words(assessment?.screening_status)}</dd></div>
