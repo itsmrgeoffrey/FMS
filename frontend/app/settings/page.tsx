@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Plus, Trash2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { LoadError, RefreshButton } from "@/components/ReviewUI";
 import { useRouter, useSearchParams } from "next/navigation";
 import RuleEngineSettings from "@/components/RuleEngineSettings";
@@ -10,6 +10,8 @@ import CtrExemptions from "@/components/CtrExemptions";
 import { api, auth } from "@/lib/api";
 import type { Approval, ApprovalsPage } from "@/lib/api";
 import type { AuthUser, AuditEntry } from "@/types";
+
+const DOCS_URL = "https://fms-production-c7d8.up.railway.app/docs";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -40,7 +42,7 @@ function Field({
 
 function DatabaseConnectionFields({ db, onSet }: { db: any; onSet: (field: string, value: unknown) => void }) {
   return <div className="space-y-4">
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label className="block text-xs text-gray-500 font-medium mb-1">Type</label>
         <select value={db.type ?? "mysql"} onChange={(e) => onSet("type", e.target.value)} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -50,7 +52,7 @@ function DatabaseConnectionFields({ db, onSet }: { db: any; onSet: (field: strin
       <Field label="Host" value={db.host ?? ""} onChange={(v) => onSet("host", v)} placeholder="Hostname or IP address" />
       <Field label="Port" value={db.port ?? ""} type="number" onChange={(v) => onSet("port", Number(v) || 0)} />
       <Field label="Database" value={db.database ?? ""} onChange={(v) => onSet("database", v)} />
-      <Field label="User" value={db.user ?? ""} onChange={(v) => onSet("user", v)} hint="Use a read-only DB user" />
+      <Field label="Read-only user" value={db.user ?? ""} onChange={(v) => onSet("user", v)} hint="Use a dedicated least-privilege DB user" />
       <Field label="Password" value={db.password ?? ""} type="password" placeholder={db.password_set ? "Stored securely" : "Not set"} onChange={(v) => onSet("password", v)} hint={db.password_set ? "Leave blank to keep the stored password." : "Enter the read-only user's password."} />
     </div>
     <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-700">
@@ -643,6 +645,8 @@ function SettingsContent() {
   const [health, setHealth] = useState<{ bank_db_connected: boolean; last_poll_at: string | null } | null>(null);
   const [testResult, setTestResult] = useState<{ connected: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [databaseConfigOpen, setDatabaseConfigOpen] = useState(false);
+  const [mappingTab, setMappingTab] = useState<"inward" | "outward">("inward");
   const [dirTest, setDirTest] = useState<{ connected: boolean; message: string } | null>(null);
   const [dirTesting, setDirTesting] = useState(false);
   const [activity, setActivity] = useState<AuditEntry[]>([]);
@@ -741,6 +745,8 @@ function SettingsContent() {
   const toggleSeparateDatabase = (tableKey: string, enabled: boolean) => {
     setData((prev: any) => {
       const next = structuredClone(prev);
+      next.tables = next.tables ?? {};
+      next.tables[tableKey] = next.tables[tableKey] ?? { table_name: "", columns: {} };
       if (enabled) {
         const shared = structuredClone(next.database);
         delete shared.password;
@@ -763,16 +769,18 @@ function SettingsContent() {
     }));
   }
 
-  function removeTransactionFeed(key: string) {
-    if (!window.confirm(`Remove the ${key} feed from these settings? Saving and restarting will stop polling this feed.`)) return;
-    setData((prev: any) => {
-      const next = structuredClone(prev);
-      delete next.tables[key];
-      return next;
-    });
+  function openDatabaseConfig() {
+    setData((prev: any) => ({
+      ...prev,
+      tables: {
+        inward: prev.tables?.inward ?? { table_name: "", columns: {} },
+        outward: prev.tables?.outward ?? { table_name: "", columns: {} },
+      },
+    }));
+    setDatabaseConfigOpen(true);
   }
 
-  function saveTransactionFeeds() {
+  function saveDatabaseAndMappings() {
     for (const [key, cfg] of Object.entries(data.tables ?? {}) as [string, any][]) {
       if (!cfg.table_name?.trim()) {
         setError(`Enter a table name for the ${key} feed.`);
@@ -784,7 +792,20 @@ function SettingsContent() {
         return;
       }
     }
-    void save("tables", { tables: data.tables ?? {} });
+    void save("databaseAndMappings", {
+      database: {
+        type: db.type,
+        host: db.host,
+        port: Number(db.port) || 0,
+        user: db.user,
+        password: db.password || "",
+        database: db.database,
+        trusted_connection: db.trusted_connection,
+        encrypt: db.encrypt,
+        trust_server_certificate: db.trust_server_certificate,
+      },
+      tables: data.tables ?? {},
+    });
   }
 
   // Non-admins have no Administration access — just their own account.
@@ -814,6 +835,49 @@ function SettingsContent() {
   const llm = data.llm;
   const tables = data.tables ?? {};
   const fields: string[] = data.mappable_fields ?? [];
+
+  const renderMapping = (key: "inward" | "outward") => {
+    const cfg = tables[key] ?? { table_name: "", columns: {} };
+    const label = key === "inward" ? "Inward" : "Outward";
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Table name" value={cfg.table_name ?? ""} placeholder={`e.g. ${key}_transactions`}
+            onChange={(v) => set(["tables", key, "table_name"], v)} />
+          {fields.map((field) => (
+            <Field
+              key={field}
+              label={field === "counterparty_account" ? (key === "inward" ? "Sender account" : "Beneficiary account") : field === "counterparty_name" ? (key === "inward" ? "Sender name" : "Beneficiary name") : ["id", "account_id", "amount", "timestamp"].includes(field) ? `${field} (required)` : field}
+              value={cfg.columns?.[field] ?? ""}
+              placeholder="(unmapped)"
+              onChange={(v) => setData((prev: any) => {
+                const next = structuredClone(prev);
+                next.tables = next.tables ?? {};
+                next.tables[key] = next.tables[key] ?? { table_name: "", columns: {} };
+                next.tables[key].columns = next.tables[key].columns ?? {};
+                if (v) next.tables[key].columns[field] = v;
+                else delete next.tables[key].columns[field];
+                return next;
+              })}
+            />
+          ))}
+        </div>
+
+        <div className="border-t border-gray-100 pt-4">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={!!cfg.database} onChange={(e) => toggleSeparateDatabase(key, e.target.checked)} className="rounded border-gray-300" />
+            Use a separate read-only database for {label.toLowerCase()} transactions
+          </label>
+          {cfg.database && (
+            <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-blue-800">{label} database override</p>
+              <DatabaseConnectionFields db={cfg.database} onSet={(field, value) => set(["tables", key, "database", field], value)} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
@@ -882,178 +946,80 @@ function SettingsContent() {
       </div>}
       {tab === "system" && isAdmin && (<>
       {/* Bank database */}
-      <Section
-        title="Shared Bank Database"
-        subtitle="Default read-only connection used by any feed without its own database override"
-        badge="Pending Restart"
-        saving={saving === "database"}
-        onSave={() =>
-          save("database", {
-            database: {
-              type: db.type,
-              host: db.host,
-              port: Number(db.port) || 0,
-              user: db.user,
-              password: db.password || "",
-              database: db.database,
-              trusted_connection: db.trusted_connection,
-              encrypt: db.encrypt,
-              trust_server_certificate: db.trust_server_certificate,
-            },
-          })
-        }
-      >
-        {/* Connection status */}
-        <div className="flex flex-wrap items-center gap-4 mb-4 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
-          <span className="inline-flex items-center gap-2 text-sm">
-            <span className={`w-2.5 h-2.5 rounded-full ${health?.bank_db_connected ? "bg-green-500" : "bg-red-500"}`} />
-            <span className="font-medium text-gray-700">{health?.bank_db_connected ? "Connected" : "Disconnected"}</span>
-          </span>
-          <span className="text-xs text-gray-400">
-            Last checked: {health?.last_poll_at ? new Date(health.last_poll_at).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "—"}
-          </span>
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">Read-only</span>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <section className="rounded-xl border border-emerald-300 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <label className="block text-xs text-gray-500 font-medium mb-1">Type</label>
-            <select
-              value={db.type}
-              onChange={(e) => set(["database", "type"], e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="mysql">MySQL</option>
-              <option value="mssql">SQL Server (MSSQL)</option>
-              <option value="postgres">PostgreSQL</option>
-              <option value="oracle">Oracle</option>
-            </select>
+            <h2 className="inline-flex items-center gap-2 text-base font-semibold text-slate-800">
+              Bank Database
+              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">Pending Restart</span>
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">Read-only connection to your core/transaction database</p>
+            <div className="mt-3 flex items-center gap-3 text-sm">
+              <span className={`inline-flex items-center gap-2 ${health?.bank_db_connected ? "text-emerald-700" : "text-slate-600"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${health?.bank_db_connected ? "bg-emerald-500" : "bg-red-500"}`} />
+                {health?.bank_db_connected ? "Connected" : "Not connected"}
+              </span>
+              <span className="text-slate-300">|</span>
+              <span className="text-slate-500">{db.type || "database"}</span>
+            </div>
           </div>
-          <Field label="Host" value={db.host} onChange={(v) => set(["database", "host"], v)} placeholder=". or hostname" />
-          <Field label="Port" value={db.port} type="number" onChange={(v) => set(["database", "port"], v)} />
-          <Field label="Database" value={db.database} onChange={(v) => set(["database", "database"], v)} />
-          <Field label="User" value={db.user} onChange={(v) => set(["database", "user"], v)} hint="Use a read-only DB user" />
-          <Field
-            label="Password"
-            value={db.password ?? ""}
-            type="password"
-            placeholder={db.password_set ? "•••••••• — stored securely" : "Not set"}
-            onChange={(v) => set(["database", "password"], v)}
-            hint={db.password_set ? "Stored securely. Leave blank to keep current, or type to change." : "Leave blank if using Windows Authentication."}
-          />
-        </div>
-
-        <label className="flex items-center gap-2 mt-4 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={!!db.trusted_connection}
-            onChange={(e) => set(["database", "trusted_connection"], e.target.checked)}
-            className="rounded border-gray-300"
-          />
-          Windows Authentication (trusted connection — MSSQL only)
-        </label>
-
-        {/* Secure connection options */}
-        <div className="mt-5 pt-4 border-t border-gray-100">
-          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Secure connection</p>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" checked={!!db.encrypt} onChange={(e) => set(["database", "encrypt"], e.target.checked)} className="rounded border-gray-300" />
-              Encrypt connection (TLS)
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" checked={!!db.trust_server_certificate} onChange={(e) => set(["database", "trust_server_certificate"], e.target.checked)} className="rounded border-gray-300" />
-              Trust server certificate
-            </label>
-          </div>
-        </div>
-
-        {/* Read-only user banner */}
-        <div className="mt-4 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800">
-          <span className="font-semibold">Use a read-only database user.</span> FMS never writes to your banking
-          database — it only reads transactions. A least-privilege (read-only) account limits exposure if credentials
-          are ever compromised.
-        </div>
-
-        {/* Test connection */}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={testConnection}
-            disabled={testing}
-            className="text-sm font-medium px-3 py-1.5 rounded-xl border border-gray-200/80 shadow-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {testing ? "Testing…" : "Test Connection"}
+          <button type="button" onClick={openDatabaseConfig} className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
+            Configure
           </button>
-          {testResult && (
-            <span className={`text-sm ${testResult.connected ? "text-green-600" : "text-red-600"}`}>
-              {testResult.connected ? "✓ " : "✗ "}{testResult.message}
-            </span>
-          )}
-          <span className="text-xs text-gray-400">Tests the currently saved connection.</span>
         </div>
-      </Section>
+      </section>
 
-      {/* Table mappings */}
-      <Section
-        title="Table Mappings"
-        subtitle="Map each feed and optionally connect it to a separate read-only database"
-        badge="Pending Restart"
-        saving={saving === "tables"}
-        onSave={saveTransactionFeeds}
-      >
-        <div className="space-y-6">
-          <div className="flex flex-wrap items-center gap-3">
-            {(["inward", "outward"] as const).filter(direction => !tables[direction]).map(direction => (
-              <button key={direction} type="button" onClick={() => addTransactionFeed(direction)} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
-                <Plus size={16} />Add {direction} feed
-              </button>
-            ))}
-          </div>
-          {Object.keys(tables).length === 0 && <p role="status" className="text-sm text-gray-500">No transaction feeds configured.</p>}
-          {Object.entries(tables).map(([key, cfg]: [string, any]) => (
-            <div key={key} className="border border-gray-100 rounded-lg p-4">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div><p className="text-xs font-bold text-gray-600 uppercase tracking-wide">{key} transactions</p>
-                  <p className="mt-1 text-xs text-gray-400">Every row from this feed enters the same FMS review engine.</p></div>
-                <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input type="checkbox" checked={!!cfg.database} onChange={(e) => toggleSeparateDatabase(key, e.target.checked)} className="rounded border-gray-300" />
-                  Use separate database
-                </label>
-                <button type="button" onClick={() => removeTransactionFeed(key)} title={`Remove ${key} feed`} aria-label={`Remove ${key} feed`} className="review-icon text-gray-500 hover:text-red-600"><Trash2 size={16} /></button></div>
+      {databaseConfigOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="database-config-title">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-gray-200 px-6 py-5">
+              <div>
+                <h2 id="database-config-title" className="text-xl font-semibold text-slate-900">Configure bank database</h2>
+                <p className="mt-1 text-sm text-slate-500">Use a dedicated read-only account. FMS never writes to the bank database.</p>
               </div>
-              {cfg.database && <div className="mb-5 border-l-2 border-blue-200 pl-4">
-                <p className="mb-3 text-xs font-semibold text-blue-800">{key === "inward" ? "Inward" : "Outward"} feed connection</p>
-                <DatabaseConnectionFields db={cfg.database} onSet={(field, value) => set(["tables", key, "database", field], value)} />
-              </div>}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <Field
-                  label="Table name"
-                  value={cfg.table_name ?? ""}
-                  onChange={(v) => set(["tables", key, "table_name"], v)}
-                />
-                {fields.map((f) => (
-                  <Field
-                    key={f}
-                    label={f === "counterparty_account" ? (key === "inward" ? "Sender account" : "Beneficiary account") : f === "counterparty_name" ? (key === "inward" ? "Sender name" : "Beneficiary name") : ["id", "account_id", "amount", "timestamp"].includes(f) ? `${f} (required)` : f}
-                    value={cfg.columns?.[f] ?? ""}
-                    placeholder="(unmapped)"
-                    onChange={(v) => {
-                      setData((prev: any) => {
-                        const next = structuredClone(prev);
-                        next.tables[key].columns = next.tables[key].columns ?? {};
-                        if (v) next.tables[key].columns[f] = v;
-                        else delete next.tables[key].columns[f];
-                        return next;
-                      });
-                    }}
-                  />
-                ))}
+              <button type="button" onClick={() => setDatabaseConfigOpen(false)} aria-label="Close database configuration" className="text-2xl leading-none text-slate-400 hover:text-slate-700">×</button>
+            </div>
+
+            <div className="flex-1 space-y-7 overflow-y-auto px-6 py-6">
+              {notice && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
+              {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+              <section>
+                <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-600">Connection</h3>
+                <DatabaseConnectionFields db={db} onSet={(field, value) => set(["database", field], value)} />
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button type="button" onClick={testConnection} disabled={testing} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-gray-50 disabled:opacity-50">
+                    {testing ? "Testing…" : "Test connection"}
+                  </button>
+                  {testResult && <span className={`text-sm ${testResult.connected ? "text-emerald-700" : "text-red-700"}`}>{testResult.connected ? "✓ " : "✗ "}{testResult.message}</span>}
+                  <span className="text-xs text-slate-400">Test the saved connection after saving.</span>
+                </div>
+              </section>
+
+              <section>
+                <div role="tablist" aria-label="Transaction table mappings" className="flex gap-7 border-b border-gray-200">
+                  {(["inward", "outward"] as const).map((direction) => (
+                    <button key={direction} type="button" role="tab" aria-selected={mappingTab === direction} onClick={() => { addTransactionFeed(direction); setMappingTab(direction); }}
+                      className={`border-b-2 px-1 pb-3 text-sm font-semibold ${mappingTab === direction ? "border-emerald-600 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+                      {direction === "inward" ? "Inward Transactions" : "Outward Transactions"}
+                    </button>
+                  ))}
+                </div>
+                <div className="pt-5">{renderMapping(mappingTab)}</div>
+              </section>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-white px-6 py-4">
+              <p className="text-sm text-slate-400">Restart FMS after saving the connection or mappings.</p>
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={() => setDatabaseConfigOpen(false)} className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-gray-50">Cancel</button>
+                <button type="button" onClick={saveDatabaseAndMappings} disabled={saving === "databaseAndMappings"} className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {saving === "databaseAndMappings" ? "Saving…" : "Save database & mappings"}
+                </button>
               </div>
             </div>
-          ))}
+          </div>
         </div>
-      </Section>
+      )}
 
       {/* Monitoring */}
       <Section
@@ -1401,6 +1367,21 @@ function SettingsContent() {
           <p className="text-xs text-gray-400 mt-2">
             The ingestion key is set on the server as <code className="font-mono">FMS_INGEST_API_KEY</code>. No bank database access is required in API mode (see System → Monitoring).
           </p>
+        </section>
+
+        <section className="bg-slate-50 rounded-xl border border-slate-200 p-5">
+          <h2 className="text-sm font-semibold text-gray-700">Developer API documentation</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Interactive API reference for authorized administrators and integration work.
+          </p>
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center mt-3 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          >
+            Open API documentation
+          </a>
         </section>
       </>)}
       </div>

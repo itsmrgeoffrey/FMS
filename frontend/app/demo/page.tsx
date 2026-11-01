@@ -38,6 +38,21 @@ function fmtAmt(amount: number, currency = "USD") {
   return `${symbol}${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 }
 
+function formatAmountInput(value: string) {
+  if (!value) return "";
+  const [wholePart, ...fractionParts] = value.replace(/,/g, "").split(".");
+  const whole = (wholePart || "0").replace(/^0+(?=\d)/, "");
+  const formattedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return fractionParts.length ? `${formattedWhole}.${fractionParts.join("")}` : formattedWhole;
+}
+
+function normalizeAmountInput(value: string) {
+  const cleaned = value.replace(/,/g, "").replace(/[^\d.]/g, "");
+  const [wholePart, ...fractionParts] = cleaned.split(".");
+  const whole = wholePart || (fractionParts.length ? "0" : "");
+  return fractionParts.length ? `${whole}.${fractionParts.join("")}` : whole;
+}
+
 function fmtDate(ts: string) {
   const d = new Date(ts);
   const now = new Date();
@@ -333,10 +348,11 @@ export default function DemoPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-2xl font-bold text-gray-300">$</span>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="0.00"
-                    value={form.amount}
-                    onChange={e => set("amount", e.target.value)}
+                    value={formatAmountInput(form.amount)}
+                    onChange={e => set("amount", normalizeAmountInput(e.target.value))}
                     aria-label="Amount"
                     className="min-w-0 w-full flex-1 text-2xl font-semibold tracking-tight text-gray-900 bg-transparent focus:outline-none placeholder-gray-200"
                   />

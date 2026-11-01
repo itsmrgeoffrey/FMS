@@ -22,10 +22,6 @@ const ICONS = {
   metrics: "M3 12h3l3 8 4-16 3 8h5",
 };
 
-// Where the "API Docs" link points. Swap this for your published Postman docs URL
-// when ready (currently the live interactive Swagger explorer as a working default).
-const DOCS_URL = "https://fms-production-c7d8.up.railway.app/docs";
-
 const NAV_GROUPS: { section: string; requires?: string; items: { href: string; label: string; d: string; requires?: string; external?: boolean }[] }[] = [
   { section: "Overview", items: [
     { href: "/dashboard", label: "Dashboard", d: ICONS.dashboard },
@@ -49,7 +45,6 @@ const NAV_GROUPS: { section: string; requires?: string; items: { href: string; l
     { href: "/demo", label: "Simulate (Demo)", d: ICONS.demo },
   ] },
   { section: "Resources", items: [
-    { href: DOCS_URL, label: "API Docs", d: ICONS.developers, external: true },
     { href: "/metrics", label: "Metrics", d: ICONS.metrics, external: true },
   ] },
 ];

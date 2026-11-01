@@ -69,7 +69,8 @@ export function CasesTable({ refresh }: { refresh?: number }) {
               <th className="px-4 py-2.5 font-semibold">Narration</th>
               <th className="px-4 py-2.5 font-semibold text-right">Amount</th>
               <th className="px-4 py-2.5 font-semibold">Dir</th>
-              <th className="px-4 py-2.5 font-semibold">Beneficiary / sender</th>
+              <th className="px-4 py-2.5 font-semibold">Beneficiary</th>
+              <th className="px-4 py-2.5 font-semibold">Sender</th>
               <th className="px-4 py-2.5 font-semibold">Fraud Type</th>
               <th className="px-4 py-2.5 font-semibold">Filings</th>
               <th className="px-4 py-2.5 font-semibold">Risk</th>
@@ -81,7 +82,7 @@ export function CasesTable({ refresh }: { refresh?: number }) {
           <tbody className={`divide-y divide-gray-50 ${loading ? "opacity-50" : ""}`}>
             {data?.items.length === 0 && (
               <tr>
-                <td colSpan={12} className="text-center py-12 text-gray-400">No transactions yet</td>
+                <td colSpan={13} className="text-center py-12 text-gray-400">No transactions yet</td>
               </tr>
             )}
             {data?.items.map((c: FraudCaseListItem) => (
@@ -93,7 +94,8 @@ export function CasesTable({ refresh }: { refresh?: number }) {
                 <td className="px-4 py-3">
                   <DirectionBadge direction={c.direction} />
                 </td>
-                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.counterparty_name || "—"}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "OUTWARD" ? (c.counterparty_name || "—") : "—"}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{c.direction === "INWARD" ? (c.counterparty_name || "—") : "—"}</td>
                 <td className="px-4 py-3 text-gray-600 capitalize">{c.fraud_type || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
