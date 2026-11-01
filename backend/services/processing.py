@@ -43,6 +43,7 @@ def from_row(row):
         source_table=getattr(row, "source_table", "api"),
         account_holder_name=getattr(row, "account_holder_name", None),
         account_holder_id=getattr(row, "account_holder_id", None),
+        account_open_date=getattr(row, "account_open_date", None),
         is_cash=getattr(row, "is_cash", None),
         business_date=getattr(row, "business_date", None),
         transaction_instrument=getattr(row, "transaction_instrument", None),
@@ -170,6 +171,7 @@ async def process(txn, supplied_history=(), timestamp_supplied=True):
                 "ctr_assessment": result.ctr_assessment,
                 "transaction_context": {
                     "account_holder_id": txn.account_holder_id,
+                    "account_open_date": txn.account_open_date,
                     "account_holder_name": txn.account_holder_name,
                     "transaction_instrument": txn.transaction_instrument,
                     "branch_id": txn.branch_id,

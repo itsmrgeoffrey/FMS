@@ -76,6 +76,7 @@ export default function DemoPage() {
     account_id: "",
     account_holder_id: "",
     account_holder_name: "",
+    account_open_date: "",
     amount: "",
     currency: "USD",
     beneficiary_account: "",
@@ -187,6 +188,7 @@ export default function DemoPage() {
         counterparty_name: direction === "OUTWARD" ? form.beneficiary_name : form.sender_name,
         account_holder_name: form.account_holder_name || undefined,
         account_holder_id: form.account_holder_id.trim() || undefined,
+        account_open_date: form.account_open_date || undefined,
         is_cash: cashKind === "UNKNOWN" ? null : cashKind === "CASH",
         acting_as_agent: cashKind === "CASH" && form.acting_as_agent !== "UNKNOWN" ? form.acting_as_agent === "YES" : null,
         cash_purpose: cashKind === "CASH" ? form.cash_purpose : undefined,
@@ -479,6 +481,12 @@ export default function DemoPage() {
                 <details className="border-t border-gray-100 pt-3">
                   <summary className="cursor-pointer text-xs font-medium text-gray-500">Test details (optional)</summary>
                   <div className="mt-3 space-y-3">
+                    <div>
+                      <label htmlFor="account-open-date" className="text-xs text-gray-400 mb-1 block">Account open date</label>
+                      <input id="account-open-date" type="date" value={form.account_open_date} onChange={e => set("account_open_date", e.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-blue-500" />
+                      <p className="text-[11px] text-gray-400 mt-1">Optional. Used to test rapid-exit/pass-through behavior.</p>
+                    </div>
                     {cashKind === "CASH" && <>
                       <label className="block text-xs text-gray-500">Account holder acting for another beneficial owner
                         <select className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm" value={form.acting_as_agent} onChange={e => set("acting_as_agent", e.target.value)}>

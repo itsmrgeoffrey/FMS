@@ -15,6 +15,9 @@ node_modules/
 *.log.*
 logs/
 
+# Local synthetic fraud-coverage QA artifacts (never commit seeded data)
+qa_runtime/
+
 # Local tooling / editor config
 .claude/
 .vscode/

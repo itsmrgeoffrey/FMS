@@ -127,6 +127,7 @@ class MSSQLAdapter(BaseAdapter):
             source_table=table_key,
             account_holder_name=get("account_holder_name"),
             account_holder_id=str(get("account_holder_id") or "") or None,
+            account_open_date=str(get("account_open_date")) if get("account_open_date") else None,
             is_cash=get("is_cash"),
             business_date=str(get("business_date")) if get("business_date") else None,
             transaction_instrument=str(get("transaction_instrument") or "") or None,

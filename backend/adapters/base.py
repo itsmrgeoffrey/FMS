@@ -45,6 +45,7 @@ class NormalizedTransaction:
     batch_id: str | None = None   # optional — set when bank table has a batch/payment-run ID column
     account_holder_name: str | None = None
     account_holder_id: str | None = None
+    account_open_date: str | None = None
     is_cash: bool | None = None
     business_date: str | None = None
     transaction_instrument: str | None = None
@@ -80,6 +81,10 @@ class NormalizedTransaction:
                 raise ValueError("cash_purpose must be PAYROLL or OTHER")
         if self.business_date:
             self.business_date = date.fromisoformat(str(self.business_date)).isoformat()
+        if self.account_open_date:
+            self.account_open_date = date.fromisoformat(str(self.account_open_date)).isoformat()
+            if self.account_open_date > self.timestamp.date().isoformat():
+                raise ValueError("account_open_date cannot be after the transaction timestamp")
         if self.direction not in ("INWARD", "OUTWARD"):
             raise ValueError("direction must be INWARD or OUTWARD")
         if not self.id.strip() or not self.account_id.strip():

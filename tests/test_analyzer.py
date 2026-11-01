@@ -120,6 +120,83 @@ def test_new_account_has_no_history_risk():
     assert "new_account_risk" in risk.components
 
 
+def test_first_wire_on_new_account_is_review_context_not_automatic_sar():
+    t = txn(
+        amount=5_000,
+        is_cash=False,
+        channel="WIRE",
+        counterparty_account="new-beneficiary",
+        counterparty_name="New Beneficiary",
+    )
+    verdict = A.evaluate(t, [])
+
+    assert "new_account_risk" in verdict["risk"].components
+    assert "new_counterparty" in verdict["risk"].components
+    assert "new_channel" in verdict["risk"].components
+    assert not verdict["sar_recommended"]
+    assert A._pick_fraud_type(verdict["risk"]) != "account takeover"
+
+
+def test_velocity_gets_a_typology_label_even_for_known_beneficiary():
+    hist = history_of([4_000, 4_000, 4_000], start=BASE - timedelta(days=3))
+    verdict = A.evaluate(txn(amount=4_000), hist)
+    assert "velocity_clustering" in verdict["risk"].components
+    assert A._pick_fraud_type(verdict["risk"]) == "velocity clustering"
+
+
+def test_near_miss_spike_is_an_explicit_review_signal():
+    hist = history_of([9_500, 9_500], start=BASE - timedelta(days=2))
+    verdict = A.evaluate(txn(amount=2_000), hist)
+    assert "near_miss_spike" in verdict["risk"].components
+    assert verdict["is_fraudulent"]
+    assert A._pick_fraud_type(verdict["risk"]) == "near-threshold pattern"
+
+
+def test_rapid_exit_requires_explicit_account_open_date():
+    hist = [txn(id="in-1", amount=6_000, direction="INWARD",
+                timestamp=BASE - timedelta(hours=12), channel="ACH",
+                counterparty_account="sender-1")]
+    current = txn(amount=6_000, direction="OUTWARD", channel="WIRE",
+                  account_open_date="2026-05-20", timestamp=BASE,
+                  counterparty_account="beneficiary-1")
+    verdict = A.evaluate(current, hist)
+    assert "rapid_exit_pass_through" in verdict["risk"].components
+
+
+def test_layering_circular_and_mule_patterns_are_explicit():
+    account = "acc-patterns"
+    layering_hist = [
+        txn(id=f"layer-{i}", account_id=account, amount=4_000,
+            timestamp=BASE - timedelta(days=i), counterparty_account=f"ben-{i}")
+        for i in range(1, 4)
+    ]
+    layering = A.evaluate(txn(id="layer-current", account_id=account, amount=4_000,
+                              timestamp=BASE, counterparty_account="ben-4"), layering_hist)
+    assert "layering_pattern" in layering["risk"].components
+
+    circular_hist = [txn(id="circle-in", account_id=account, amount=6_000,
+                          direction="INWARD", counterparty_account="circle-party")]
+    circular = A.evaluate(txn(id="circle-out", account_id=account, amount=6_000,
+                              direction="OUTWARD", counterparty_account="circle-party"), circular_hist)
+    assert "circular_flow" in circular["risk"].components
+
+    mule_hist = [txn(id=f"mule-{i}", account_id=account, amount=3_000,
+                     direction="INWARD", timestamp=BASE - timedelta(hours=i + 1),
+                     counterparty_account=f"sender-{i}") for i in range(1, 5)]
+    mule = A.evaluate(txn(id="mule-out", account_id=account, amount=11_000,
+                          direction="OUTWARD", counterparty_account="mule-ben"), mule_hist)
+    assert "mule_account_pattern" in mule["risk"].components
+
+
+def test_high_velocity_review_requires_context_beyond_busy_day():
+    hist = [txn(id=f"busy-{i}", amount=1_000, timestamp=BASE - timedelta(hours=i + 1))
+            for i in range(5)]
+    current = txn(amount=6_000, channel="MOBILE", counterparty_account="new-busy-ben")
+    verdict = A.evaluate(current, hist)
+    assert "high_velocity" in verdict["risk"].components
+    assert "high_velocity_review" in verdict["risk"].components
+
+
 def test_unverified_batch_reference_cannot_suppress_score():
     hist = history_of([1_000, 1_050, 950])
     plain = analyze_score(txn(amount=40_000), hist)

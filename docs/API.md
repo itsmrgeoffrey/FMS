@@ -27,7 +27,7 @@ curl -X POST http://localhost:8002/ingest/transactions \
 ```
 Returns the verdict **synchronously**: risk score/level, the named signals that fired (with the actual numbers), CTR/SAR assessment, sanctions/watch-list result, and the case id if one was raised. `external_id` is idempotent — the same id never creates a duplicate case. `POST /ingest/simulate` (authenticated user, not the ingest key) exercises the same path for demos.
 
-The ingestion contract also accepts cash classification, business date, transaction instrument, branch/location, conductor, and stable account-holder identifiers. Supplying these fields enables the explicit same-day cross-branch cash structuring alert; `structuring_alert` is returned independently from `ctr_required`.
+The ingestion contract also accepts cash classification, business date, transaction instrument, branch/location, conductor, and stable account-holder identifiers. Supplying these fields enables the explicit same-day cross-branch cash structuring alert; `structuring_alert` is returned independently from `ctr_required`. `account_open_date` is optional but should be supplied by the source system when available; FMS uses it for the conservative rapid-exit/pass-through signal and never infers account age from the first transaction observed.
 
 Cash reporting aggregates across accounts and feeds using consistent `account_holder_id` or `conductor_id` values. Optional `acting_as_agent` (boolean) and `cash_purpose` (`PAYROLL` or `OTHER`) establish transaction scope for an approved exemption. Unknown agent status prevents exemption application. Callers cannot submit a self-approved exemption flag. The result's `assessment.ctr_assessment` records grouping totals and any applied exemption.
 

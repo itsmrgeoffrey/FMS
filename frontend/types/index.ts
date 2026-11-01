@@ -123,6 +123,7 @@ export interface Assessment {
   transaction_context?: {
     account_holder_id?: string | null;
     account_holder_name?: string | null;
+    account_open_date?: string | null;
     transaction_instrument?: string | null;
     branch_id?: string | null;
     location_id?: string | null;

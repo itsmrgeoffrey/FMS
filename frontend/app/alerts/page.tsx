@@ -14,7 +14,9 @@ export default function AlertsPage() {
   const role = auth.user()?.role;
   const canApprove = role === "approver" || role === "admin";
   const canInput = role === "analyst";
-  const [queue, setQueue] = useState<Queue>(canApprove ? "approvals" : "review");
+  // Every role lands in the operational review queue first. Approvers can
+  // deliberately switch to Decision Approvals when they are ready to decide.
+  const [queue, setQueue] = useState<Queue>("review");
   const [filters, setFilters] = useState(defaults);
   const [draft, setDraft] = useState("");
   const [items, setItems] = useState<FraudCaseListItem[]>([]);

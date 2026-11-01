@@ -60,12 +60,15 @@ X-API-Key: <your key>
 | `direction` | string | ✔ | `INWARD` or `OUTWARD`. |
 | `timestamp` | string (ISO 8601) | — | Defaults to server time (UTC) if omitted. |
 | `counterparty_account` | string (≤64) | — | API-compatible field for the beneficiary account on outward transactions or sender account on inward transactions. |
-| `counterparty_name` | string (≤200) | — | API-compatible field for the beneficiary/sender name; screened against the OFAC lists. |
+| `counterparty_name` | string (≤200) | — | Generic API-compatible field for the beneficiary (outward) or sender (inward); screened against the OFAC lists. |
+| `beneficiary_account` / `beneficiary_name` | string | — | Optional aliases for `counterparty_account` / `counterparty_name` when `direction` is `OUTWARD`; supplying them for inward activity is rejected. |
+| `sender_account` / `sender_name` | string | — | Optional aliases for `counterparty_account` / `counterparty_name` when `direction` is `INWARD`; supplying them for outward activity is rejected. |
 | `channel` | string (≤40) | — | e.g. `wire`, `ach`, `card`, `transfer`. |
 | `currency` | three-letter string | — | Defaults to `USD`. |
 | `reference` | string (≤255) | — | Free-text reference / memo. |
 | `account_holder_name` | string (≤200) | — | If provided, screened against the OFAC SDN + consolidated lists. |
 | `account_holder_id` | string (≤64) | — | Stable customer/member identifier retained with the assessment. |
+| `account_open_date` | ISO date | — | Source-provided account opening date; used for rapid-exit/pass-through review and never inferred from FMS history. |
 | `is_cash` | boolean or null | — | `true` for cash, `false` for non-cash; missing/null requires manual classification. |
 | `business_date` | ISO date | — | Source banking date used for same-day aggregation. |
 | `transaction_instrument` | string (≤40) | — | e.g. `CASH_DEPOSIT`, `CASH_WITHDRAWAL`, `WIRE`, `ACH`, `CHECK`, `CARD`. |

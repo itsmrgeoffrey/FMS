@@ -68,6 +68,25 @@ def test_pre_upgrade_processing_payloads_canonicalize_new_optional_fields():
     ))
 
 
+def test_ingest_directional_party_aliases_preserve_sender_and_beneficiary_roles():
+    from pydantic import ValidationError
+    from backend.routers.ingest import TxnIn
+
+    inward = TxnIn(external_id="incoming-party", account_id="A", amount="100",
+        direction="INWARD", sender_account="SENDER-001", sender_name="Incoming Sender")
+    assert inward.counterparty_account == "SENDER-001"
+    assert inward.counterparty_name == "Incoming Sender"
+
+    outward = TxnIn(external_id="outgoing-party", account_id="A", amount="100",
+        direction="OUTWARD", beneficiary_account="BEN-001", beneficiary_name="Outgoing Beneficiary")
+    assert outward.counterparty_account == "BEN-001"
+    assert outward.counterparty_name == "Outgoing Beneficiary"
+
+    with pytest.raises(ValidationError, match="sender_account"):
+        TxnIn(external_id="wrong-party", account_id="A", amount="100",
+            direction="OUTWARD", sender_name="Should not be a beneficiary")
+
+
 def test_processing_preserves_context_and_returns_structuring_alert(store):
     async def run():
         await P.process(txn(id="branch-1", amount="6000", branch_id="BR-001",

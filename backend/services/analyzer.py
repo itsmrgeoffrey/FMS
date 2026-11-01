@@ -83,6 +83,11 @@ SAR_RATIO = 0.5
 ROLLING_WINDOW_DAYS = 5
 SMURFING_WINDOW_HOURS = 48
 STRUCTURING_BAND_RATIO = 0.9   # bottom of near-threshold band = 90% of high-value threshold
+RAPID_EXIT_WINDOW_HOURS = 72
+RAPID_EXIT_RATIO = 0.85
+CIRCULAR_FLOW_WINDOW_DAYS = 7
+MULE_FLOW_WINDOW_HOURS = 72
+LAYERING_MIN_BENEFICIARIES = 3
 
 def validate_rule_overrides(rules: dict) -> dict:
     if not isinstance(rules, dict):
@@ -197,6 +202,8 @@ SYSTEM_PROMPT = (
     "Focus on behaviour: what this account normally does, what this transaction does differently, "
     "and what the officer should do next. "
     "CTR and SAR flags require officer verification of filing applicability; they are not findings of fraud. "
+    "First-time activity, a new beneficiary or sender, and a new channel are contextual review indicators only; "
+    "do not describe them alone as fraud, account compromise, or grounds for a SAR. "
     "Name matches are possible matches, never confirmed identity matches. "
     "Respond with valid JSON only. No markdown."
 )
@@ -210,16 +217,25 @@ def _pick_fraud_type(risk: "RiskScoreResult") -> str | None:
         return "multi-source smurfing"
     if "outward_smurfing" in c:
         return "outward smurfing"
-    if "velocity_clustering" in c and "new_counterparty" in c:
-        return "velocity clustering"
-    if "near_threshold_amount" in c:
+    if "layering_pattern" in c:
+        return "layering"
+    if "circular_flow" in c:
+        return "circular transaction pattern"
+    if "mule_account_pattern" in c:
+        return "mule account pattern"
+    if "near_threshold_amount" in c or "near_miss_spike" in c:
         return "near-threshold pattern"
-    # Account takeover: established account suddenly uses a new channel or odd hours with unknown recipient
+    if "velocity_clustering" in c:
+        return "velocity clustering"
+    if "high_velocity_review" in c:
+        return "high-velocity activity"
+    # Account takeover: an established account suddenly uses a new channel or odd hours with an unknown recipient.
+    # A genuinely new account cannot be described as taken over from transaction history alone.
     if (
         "behavioral_deviation" in c
         and "new_counterparty" in c
         and ("new_channel" in c or "odd_hours" in c)
-    ) or ("new_account_risk" in c and "high_value_transfer" in c):
+    ):
         return "account takeover"
     # Invoice fraud: established account, large unexpected payment to a new vendor
     if "behavioral_deviation" in c and "new_counterparty" in c:
@@ -365,6 +381,18 @@ def _assess_sar(
     if not is_fraudulent or not supported_reporting(txn):
         return False, ""
 
+    # Amount alone, first-time activity, a new beneficiary, or a new channel do
+    # not establish suspicious activity. Those signals can open a case for
+    # contextual review, but a SAR recommendation needs an additional pattern
+    # or meaningful behavioral anomaly.
+    suspicious_signals = _STRUCTURING_SIGNALS | {
+        "behavioral_deviation", "odd_hours", "high_velocity", "elevated_velocity",
+        "rapid_exit_pass_through", "layering_pattern", "circular_flow",
+        "mule_account_pattern", "high_velocity_review",
+    }
+    if not any(signal in risk.components for signal in suspicious_signals):
+        return False, ""
+
     cur = txn.currency
     sar_threshold = Decimal("5000")
     # Largest suspicious amount in play: the transaction itself or a suspicious aggregate.
@@ -480,6 +508,51 @@ def _compute_risk_score(
     rolling_total, rolling_count = _rolling_window(txn, history)
     src_count_48h, inbound_total_48h = _inbound_sources(txn, history)
 
+    # Shared windows used by the explicit flow-pattern checks below. These are
+    # deliberately account-level and transparent; they do not infer ownership
+    # or merge related accounts.
+    window_72h = txn.timestamp - timedelta(hours=RAPID_EXIT_WINDOW_HOURS)
+    recent_72h = [
+        h for h in history
+        if isinstance(h.timestamp, datetime) and h.timestamp >= window_72h
+    ]
+    inbound_72h = [h for h in recent_72h if h.direction == "INWARD"]
+    outbound_72h = [h for h in recent_72h if h.direction == "OUTWARD"]
+    inbound_72h_total = sum((h.amount for h in inbound_72h), Decimal(0))
+    outbound_72h_total = sum((h.amount for h in outbound_72h), Decimal(0)) + (
+        txn.amount if txn.direction == "OUTWARD" else Decimal(0)
+    )
+
+    account_age_days = None
+    if txn.account_open_date:
+        account_age_days = (txn.timestamp.date() - datetime.fromisoformat(
+            txn.account_open_date,
+        ).date()).days
+
+    # Rapid exit/pass-through: an explicit account-open date is required. FMS
+    # must not mistake the first transaction it observed for the account's age.
+    if (
+        txn.currency == "USD"
+        and txn.direction == "OUTWARD"
+        and account_age_days is not None
+        and 0 <= account_age_days <= 30
+        and inbound_72h_total >= Decimal("5000")
+        and outbound_72h_total >= inbound_72h_total * Decimal(str(RAPID_EXIT_RATIO))
+    ):
+        components["rapid_exit_pass_through"] = {
+            "score": 35,
+            "account_age_days": account_age_days,
+            "inbound_total_72h": float(inbound_72h_total),
+            "outbound_total_72h": float(outbound_72h_total),
+            "reason": (
+                f"Account opened {account_age_days} days ago; USD {inbound_72h_total:,.2f} "
+                f"was received in the last {MULE_FLOW_WINDOW_HOURS} hours and USD "
+                f"{outbound_72h_total:,.2f} was sent back out, meeting the "
+                f"{RAPID_EXIT_RATIO:.0%} rapid-exit review ratio"
+            ),
+        }
+        score += 35
+
     # Cash split across branches/locations on one business day is a separate
     # suspicious pattern from CTR applicability. Every contributing item must
     # be individually at or below the benchmark; the aggregate may still
@@ -519,7 +592,7 @@ def _compute_risk_score(
         behavioral_verdict = "NEW_ACCOUNT"
         components["new_account_risk"] = {
             "score": dev_pts,
-            "reason": "No prior transaction history — flagged as first-time activity on a new or unseasoned account",
+            "reason": "No prior transaction history is available, so a reliable behavioral baseline cannot yet be established",
         }
     else:
         z = (
@@ -608,6 +681,36 @@ def _compute_risk_score(
         }
         score += 25
 
+    # Layering: multiple outward beneficiaries in one rolling window with a
+    # material aggregate. This is distinct from repeated payments to one party.
+    rolling_outward = [
+        h for h in history
+        if h.direction == "OUTWARD"
+        and isinstance(h.timestamp, datetime)
+        and h.timestamp >= txn.timestamp - timedelta(days=ROLLING_WINDOW_DAYS)
+    ]
+    if txn.direction == "OUTWARD" and txn.counterparty_account:
+        rolling_beneficiaries = {
+            h.counterparty_account for h in rolling_outward if h.counterparty_account
+        }
+        rolling_beneficiaries.add(txn.counterparty_account)
+        if (
+            len(rolling_beneficiaries) >= LAYERING_MIN_BENEFICIARIES
+            and rolling_total >= threshold
+            and rolling_count >= LAYERING_MIN_BENEFICIARIES
+            and txn.amount < threshold
+        ):
+            components["layering_pattern"] = {
+                "score": 22,
+                "beneficiary_count": len(rolling_beneficiaries),
+                "reason": (
+                    f"{len(rolling_beneficiaries)} different beneficiaries received "
+                    f"{txn.currency} {rolling_total:,.2f} in the last "
+                    f"{ROLLING_WINDOW_DAYS} days"
+                ),
+            }
+            score += 22
+
     # ── 5. Outward same-counterparty day accumulation / classic smurfing (20) ─
     today = business_day(txn)
     known_cps = {h.counterparty_account for h in history if h.counterparty_account}
@@ -643,6 +746,55 @@ def _compute_risk_score(
             "reason": (
                 f"{src_count_48h} different accounts deposited into this account in the last "
                 f"{SMURFING_WINDOW_HOURS}h; combined inflow: {txn.currency} {inbound_total_48h:,.2f}"
+            ),
+        }
+        score += 25
+
+    # Circular flow: the account sends to and receives from the same party in
+    # opposite directions within a short window. This is a review pattern, not
+    # a conclusion that the funds were laundered.
+    if txn.counterparty_account:
+        opposite = [
+            h for h in history
+            if h.counterparty_account == txn.counterparty_account
+            and h.direction != txn.direction
+            and isinstance(h.timestamp, datetime)
+            and h.timestamp >= txn.timestamp - timedelta(days=CIRCULAR_FLOW_WINDOW_DAYS)
+        ]
+        opposite_total = sum((h.amount for h in opposite), Decimal(0))
+        if opposite and opposite_total + txn.amount >= Decimal("5000"):
+            components["circular_flow"] = {
+                "score": 25,
+                "counterparty": txn.counterparty_account,
+                "opposite_total": float(opposite_total),
+                "reason": (
+                    f"This account both received from and sent to beneficiary/sender "
+                    f"{txn.counterparty_account} within {CIRCULAR_FLOW_WINDOW_DAYS} days; "
+                    f"the linked opposite-direction activity totals {txn.currency} "
+                    f"{opposite_total + txn.amount:,.2f}"
+                ),
+            }
+            score += 25
+
+    # Mule/pass-through pattern: multiple unrelated inbound sources followed by
+    # a rapid outbound movement of most of the observed inflow.
+    if (
+        txn.currency == "USD"
+        and txn.direction == "OUTWARD"
+        and len({h.counterparty_account for h in inbound_72h if h.counterparty_account}) >= 3
+        and inbound_72h_total >= Decimal("10000")
+        and outbound_72h_total >= inbound_72h_total * Decimal(str(RAPID_EXIT_RATIO))
+    ):
+        components["mule_account_pattern"] = {
+            "score": 25,
+            "inbound_sources": len({h.counterparty_account for h in inbound_72h if h.counterparty_account}),
+            "inbound_total_72h": float(inbound_72h_total),
+            "outbound_total_72h": float(outbound_72h_total),
+            "reason": (
+                f"{len({h.counterparty_account for h in inbound_72h if h.counterparty_account})} "
+                f"different senders supplied USD {inbound_72h_total:,.2f} in the last "
+                f"{MULE_FLOW_WINDOW_HOURS} hours, followed by USD {outbound_72h_total:,.2f} "
+                "sent outward"
             ),
         }
         score += 25
@@ -710,6 +862,20 @@ def _compute_risk_score(
             }
             score += 5
 
+    # Busy accounts should not alert on transaction count alone. Add a stronger
+    # review signal only when high same-day velocity is combined with a new
+    # beneficiary/channel or a materially sized transaction.
+    if "high_velocity" in components and (
+        "new_counterparty" in components
+        or "new_channel" in components
+        or txn.amount >= threshold * Decimal("0.5")
+    ):
+        components["high_velocity_review"] = {
+            "score": 15,
+            "reason": "High same-day velocity is combined with a new party, new channel, or materially sized transaction",
+        }
+        score += 15
+
     score = max(0, min(100, score))
 
     if score <= 30:
@@ -749,8 +915,7 @@ def _plain_reasons(
 
     if "new_account_risk" in c:
         reasons.append(
-            "This account has no previous transaction history — "
-            "this is first-time activity on a new or unseasoned account."
+            "No prior transaction history is available for this account, so a reliable behavioral baseline cannot yet be established."
         )
 
     # When the amount both deviates from the norm AND the account has an established
@@ -804,6 +969,13 @@ def _plain_reasons(
             f"{cur} {threshold:,.0f} behavioral benchmark, while the current transfer is below it."
         )
 
+    if "layering_pattern" in c:
+        signal = c["layering_pattern"]
+        reasons.append(
+            f"Layering review signal: {signal['beneficiary_count']} different beneficiaries received "
+            f"{cur} {risk.rolling_5d_total:,.2f} from this account in the last {ROLLING_WINDOW_DAYS} days."
+        )
+
     if "outward_smurfing" in c:
         reasons.append(
             f"Multiple payments were sent to the same recipient today, "
@@ -817,6 +989,30 @@ def _plain_reasons(
             f"this pattern of multiple small deposits from different senders is known as smurfing."
         )
 
+    if "rapid_exit_pass_through" in c:
+        signal = c["rapid_exit_pass_through"]
+        reasons.append(
+            f"Rapid-exit review signal: this account is {signal['account_age_days']} days old; "
+            f"inbound activity of {cur} {signal['inbound_total_72h']:,.2f} was followed by "
+            f"{cur} {signal['outbound_total_72h']:,.2f} in outward activity within {MULE_FLOW_WINDOW_HOURS} hours."
+        )
+
+    if "mule_account_pattern" in c:
+        signal = c["mule_account_pattern"]
+        reasons.append(
+            f"Mule-account review signal: {signal['inbound_sources']} different senders supplied "
+            f"{cur} {signal['inbound_total_72h']:,.2f}, followed by {cur} "
+            f"{signal['outbound_total_72h']:,.2f} sent outward within {MULE_FLOW_WINDOW_HOURS} hours."
+        )
+
+    if "circular_flow" in c:
+        signal = c["circular_flow"]
+        reasons.append(
+            f"Circular-flow review signal: opposite-direction activity involving "
+            f"{signal['counterparty']} totals {cur} {signal['opposite_total']:,.2f} "
+            f"within {CIRCULAR_FLOW_WINDOW_DAYS} days."
+        )
+
     if "near_miss_spike" in c:
         reasons.append(
             f"Several recent transactions from this account clustered just below the "
@@ -826,9 +1022,9 @@ def _plain_reasons(
     if "new_counterparty" in c:
         name = txn.counterparty_name or txn.counterparty_account or ("the sender" if receiving else "the beneficiary")
         if receiving:
-            reasons.append(f"{name} has never sent money to this account before.")
+            reasons.append(f"The sender {name} has not previously sent money to this account in the observed history.")
         else:
-            reasons.append(f"{name} has never received a payment from this account before.")
+            reasons.append(f"The beneficiary {name} has not previously received a payment from this account in the observed history.")
 
     if "odd_hours" in c:
         hour = txn.timestamp.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(settings.business_timezone)).hour
@@ -836,12 +1032,16 @@ def _plain_reasons(
 
     if "new_channel" in c:
         reasons.append(
-            f"This account has never used {txn.channel} to make transfers before — "
-            f"a sudden change in how an account sends money can indicate the account has been compromised."
+            f"This account has not previously used {txn.channel} for observed transfers; verify that the new channel is consistent with the account's expected activity."
         )
 
     if "high_velocity" in c or "elevated_velocity" in c:
         reasons.append("This account has made an unusually high number of transactions today.")
+
+    if "high_velocity_review" in c:
+        reasons.append(
+            "High same-day velocity is combined with another contextual risk signal and requires review."
+        )
 
     return reasons or ["No specific fraud signals were detected for this transaction."]
 
@@ -858,18 +1058,15 @@ def _fallback_summary(
     """Build a plain-English summary without the LLM, so an outage never blocks
     a case from being created. Uses the already-computed deterministic reasons."""
     cur = txn.currency
+    subject = f"This {cur} {txn.amount:,.2f} {txn.direction.lower()} transaction is being reviewed."
     if profile.transaction_count > 0 and profile.avg_amount > 0:
-        opener = (
-            f"This account typically transfers around {cur} {profile.avg_amount:,.0f}; "
-            f"this {cur} {txn.amount:,.2f} {txn.direction.lower()} transaction was assessed. "
-        )
+        context = f"The account's observed average transaction is {cur} {profile.avg_amount:,.0f}."
     else:
-        opener = f"This {cur} {txn.amount:,.2f} {txn.direction.lower()} transaction was assessed with no prior account history. "
-    body = " ".join(reasons[:2])
-    action = ""
+        context = "No prior transaction history is available, so a reliable behavioral baseline cannot yet be established."
+    action = "Review the account purpose, source of funds, payment purpose, and beneficiary relationship before deciding whether the activity is suspicious."
     if ctr.required:
-        action += " A compliance officer must verify CTR filing applicability separately from the fraud assessment."
-    return (opener + body + action).strip()
+        action += " CTR filing applicability must be verified separately by a compliance officer."
+    return f"{subject} {context} {action} These indicators are review signals, not a finding of fraud.".strip()
 
 
 # ─── Deterministic verdict core ──────────────────────────────────────────────
@@ -879,7 +1076,8 @@ def _fallback_summary(
 
 _HARD_FRAUD_SIGNALS = frozenset(
     {"near_threshold_amount", "velocity_clustering", "outward_smurfing",
-     "multi_source_smurfing", "cross_branch_structuring"}
+     "multi_source_smurfing", "cross_branch_structuring", "near_miss_spike",
+     "layering_pattern", "circular_flow", "mule_account_pattern", "high_velocity_review"}
 )
 
 
@@ -1007,6 +1205,9 @@ Write 2-3 plain-English sentences that:
 1. State what this account normally does (use the baseline numbers above)
 2. State exactly what is different about this transaction (use the delta numbers)
 3. Tell the officer what action to take
+
+Treat first-time activity, a new beneficiary or sender, and a new channel as review context—not as a finding of fraud,
+account compromise, or automatic SAR grounds. CTR and SAR applicability must be verified by the compliance officer.
 
 No jargon. No scores. No internal system names. Use the actual numbers from the delta report.
 
